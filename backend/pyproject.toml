@@ -18,6 +18,11 @@ dependencies = [
     "markdown-to-mrkdwn>=0.3.1",
 ]
 
+[project.optional-dependencies]
+postgres = [
+    "deerflow-harness[postgres]",
+]
+
 [dependency-groups]
 dev = ["pytest>=8.0.0", "ruff>=0.14.11"]
 
