@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 from langchain_core.messages import HumanMessage
 
-from app.gateway.deps import get_checkpointer, get_run_event_store, get_run_manager, get_run_store, get_store, get_stream_bridge
+from app.gateway.deps import get_checkpointer, get_run_event_store, get_run_manager, get_run_store, get_store, get_stream_bridge, get_thread_meta_repo
 from deerflow.runtime import (
     END_SENTINEL,
     HEARTBEAT_SENTINEL,
@@ -273,6 +273,22 @@ async def start_run(
     store = get_store(request)
     if store is not None:
         await _upsert_thread_in_store(store, thread_id, body.metadata)
+
+    # Upsert thread metadata in the SQL-backed threads_meta table
+    thread_meta_repo = get_thread_meta_repo(request)
+    if thread_meta_repo is not None:
+        try:
+            existing = await thread_meta_repo.get(thread_id)
+            if existing is None:
+                await thread_meta_repo.create(
+                    thread_id,
+                    assistant_id=body.assistant_id,
+                    metadata=body.metadata,
+                )
+            else:
+                await thread_meta_repo.update_status(thread_id, "running")
+        except Exception:
+            logger.warning("Failed to upsert thread_meta for %s (non-fatal)", thread_id)
 
     # Resolve follow_up_to_run_id: explicit from request, or auto-detect from latest successful run
     follow_up_to_run_id = getattr(body, "follow_up_to_run_id", None)
