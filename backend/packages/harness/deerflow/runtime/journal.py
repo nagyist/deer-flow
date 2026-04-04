@@ -67,6 +67,9 @@ class RunJournal(BaseCallbackHandler):
         # Latency tracking
         self._llm_start_times: dict[str, float] = {}  # langchain run_id -> start time
 
+        # Tool call ID cache
+        self._tool_call_ids: dict[str, str] = {}  # langchain run_id -> tool_call_id
+
     # -- Lifecycle callbacks --
 
     def on_chain_start(self, serialized: dict, inputs: Any, *, run_id: UUID, **kwargs: Any) -> None:
@@ -189,26 +192,45 @@ class RunJournal(BaseCallbackHandler):
     # -- Tool callbacks --
 
     def on_tool_start(self, serialized: dict, input_str: str, *, run_id: UUID, **kwargs: Any) -> None:
+        tool_call_id = kwargs.get("tool_call_id")
+        if tool_call_id:
+            self._tool_call_ids[str(run_id)] = tool_call_id
         self._put(
             event_type="tool_start",
             category="trace",
             metadata={
                 "tool_name": serialized.get("name", ""),
-                "tool_call_id": kwargs.get("tool_call_id"),
+                "tool_call_id": tool_call_id,
                 "args": str(input_str)[:2000],
             },
         )
 
     def on_tool_end(self, output: str, *, run_id: UUID, **kwargs: Any) -> None:
+        tool_call_id = kwargs.get("tool_call_id") or self._tool_call_ids.pop(str(run_id), None)
+        tool_name = kwargs.get("name", "")
+
+        # Trace event (always)
         self._put(
             event_type="tool_end",
             category="trace",
             content=str(output),
             metadata={
-                "tool_name": kwargs.get("name", ""),
-                "tool_call_id": kwargs.get("tool_call_id"),
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
                 "status": "success",
             },
+        )
+
+        # Message event: tool_result
+        self._put(
+            event_type="tool_result",
+            category="message",
+            content={
+                "role": "tool",
+                "tool_call_id": tool_call_id or "",
+                "content": str(output),
+            },
+            metadata={"tool_name": tool_name},
         )
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:

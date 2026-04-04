@@ -185,9 +185,9 @@ class TestToolCallbacks:
         j.on_tool_end("results", run_id=uuid4(), name="web_search")
         await j.flush()
         events = await store.list_events("t1", "r1")
-        types = {e["event_type"] for e in events}
-        assert "tool_start" in types
-        assert "tool_end" in types
+        trace_types = {e["event_type"] for e in events if e["category"] == "trace"}
+        assert "tool_start" in trace_types
+        assert "tool_end" in trace_types
 
     @pytest.mark.anyio
     async def test_on_tool_error(self, journal_setup):
@@ -620,6 +620,43 @@ class TestOpenAIMessageFormat:
             run_id=uuid4(),
             tags=["subagent:research"],
         )
+        await j.flush()
+        messages = await store.list_messages("t1")
+        assert len(messages) == 0
+
+
+class TestToolResultMessage:
+    @pytest.mark.anyio
+    async def test_tool_end_produces_tool_result_message(self, journal_setup):
+        j, store = journal_setup
+        run_id = uuid4()
+        j.on_tool_start({"name": "web_search"}, '{"query": "test"}', run_id=run_id, tool_call_id="call_abc")
+        j.on_tool_end("search results here", run_id=run_id, name="web_search", tool_call_id="call_abc")
+        await j.flush()
+        messages = await store.list_messages("t1")
+        assert len(messages) == 1
+        assert messages[0]["event_type"] == "tool_result"
+        assert messages[0]["content"] == {
+            "role": "tool",
+            "tool_call_id": "call_abc",
+            "content": "search results here",
+        }
+
+    @pytest.mark.anyio
+    async def test_tool_result_missing_tool_call_id(self, journal_setup):
+        j, store = journal_setup
+        run_id = uuid4()
+        j.on_tool_start({"name": "bash"}, "ls", run_id=run_id)
+        j.on_tool_end("file1.txt", run_id=run_id, name="bash")
+        await j.flush()
+        messages = await store.list_messages("t1")
+        assert len(messages) == 1
+        assert messages[0]["content"]["role"] == "tool"
+
+    @pytest.mark.anyio
+    async def test_tool_error_no_tool_result_message(self, journal_setup):
+        j, store = journal_setup
+        j.on_tool_error(TimeoutError("timeout"), run_id=uuid4(), name="web_fetch", tool_call_id="call_1")
         await j.flush()
         messages = await store.list_messages("t1")
         assert len(messages) == 0
