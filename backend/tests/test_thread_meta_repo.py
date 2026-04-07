@@ -2,7 +2,7 @@
 
 import pytest
 
-from deerflow.persistence.repositories.thread_meta_repo import ThreadMetaRepository
+from deerflow.persistence.thread_meta import ThreadMetaRepository
 
 
 async def _make_repo(tmp_path):

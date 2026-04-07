@@ -5,7 +5,7 @@ Uses temp SQLite DB for ORM tests.
 
 import pytest
 
-from deerflow.persistence.repositories.feedback_repo import FeedbackRepository
+from deerflow.persistence.feedback import FeedbackRepository
 
 
 async def _make_feedback_repo(tmp_path):

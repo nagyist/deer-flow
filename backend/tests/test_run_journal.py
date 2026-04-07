@@ -373,7 +373,7 @@ class TestDbBackedLifecycle:
     async def test_full_lifecycle_with_sqlite(self, tmp_path):
         """Full lifecycle with SQLite-backed RunRepository + DbRunEventStore."""
         from deerflow.persistence.engine import close_engine, get_session_factory, init_engine
-        from deerflow.persistence.repositories.run_repo import RunRepository
+        from deerflow.persistence.run import RunRepository
         from deerflow.runtime.events.store.db import DbRunEventStore
         from deerflow.runtime.runs.manager import RunManager
 

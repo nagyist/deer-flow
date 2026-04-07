@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deerflow.persistence.models.run import RunRow
+from deerflow.persistence.run.model import RunRow
 from deerflow.runtime.runs.store.base import RunStore
 
 

@@ -5,7 +5,7 @@ Uses a temp SQLite DB to test ORM-backed CRUD operations.
 
 import pytest
 
-from deerflow.persistence.repositories.run_repo import RunRepository
+from deerflow.persistence.run import RunRepository
 
 
 async def _make_repo(tmp_path):

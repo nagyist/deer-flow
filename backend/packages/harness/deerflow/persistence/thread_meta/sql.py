@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deerflow.persistence.models.thread_meta import ThreadMetaRow
-from deerflow.persistence.repositories.thread_meta_base import ThreadMetaStore
+from deerflow.persistence.thread_meta.base import ThreadMetaStore
+from deerflow.persistence.thread_meta.model import ThreadMetaRow
 
 
 class ThreadMetaRepository(ThreadMetaStore):

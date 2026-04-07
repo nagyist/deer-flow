@@ -12,7 +12,7 @@ from typing import Any
 
 from langgraph.store.base import BaseStore
 
-from deerflow.persistence.repositories.thread_meta_base import ThreadMetaStore
+from deerflow.persistence.thread_meta.base import ThreadMetaStore
 
 THREADS_NS: tuple[str, ...] = ("threads",)
 
