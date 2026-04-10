@@ -24,18 +24,19 @@ class TestDatabaseConfig:
         assert c.backend == "memory"
         assert c.pool_size == 5
 
-    def test_sqlite_paths_are_different(self):
+    def test_sqlite_paths_unified(self):
         c = DatabaseConfig(backend="sqlite", sqlite_dir="./mydata")
-        assert c.checkpointer_sqlite_path.endswith("checkpoints.db")
-        assert c.app_sqlite_path.endswith("app.db")
-        assert "mydata" in c.checkpointer_sqlite_path
-        assert c.checkpointer_sqlite_path != c.app_sqlite_path
+        assert c.sqlite_path.endswith("deerflow.db")
+        assert "mydata" in c.sqlite_path
+        # Backward-compatible aliases point to the same file
+        assert c.checkpointer_sqlite_path == c.sqlite_path
+        assert c.app_sqlite_path == c.sqlite_path
 
     def test_app_sqlalchemy_url_sqlite(self):
         c = DatabaseConfig(backend="sqlite", sqlite_dir="./data")
         url = c.app_sqlalchemy_url
         assert url.startswith("sqlite+aiosqlite:///")
-        assert "app.db" in url
+        assert "deerflow.db" in url
 
     def test_app_sqlalchemy_url_postgres(self):
         c = DatabaseConfig(

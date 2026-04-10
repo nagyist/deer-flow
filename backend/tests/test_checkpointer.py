@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import deerflow.config.app_config as app_config_module
-from deerflow.agents.checkpointer import get_checkpointer, reset_checkpointer
+from deerflow.runtime.checkpointer import get_checkpointer, reset_checkpointer
 from deerflow.config.checkpointer_config import (
     CheckpointerConfig,
     get_checkpointer_config,
@@ -78,7 +78,7 @@ class TestGetCheckpointer:
         """get_checkpointer should return InMemorySaver when not configured."""
         from langgraph.checkpoint.memory import InMemorySaver
 
-        with patch("deerflow.agents.checkpointer.provider.get_app_config", side_effect=FileNotFoundError):
+        with patch("deerflow.runtime.checkpointer.provider.get_app_config", side_effect=FileNotFoundError):
             cp = get_checkpointer()
         assert cp is not None
         assert isinstance(cp, InMemorySaver)
