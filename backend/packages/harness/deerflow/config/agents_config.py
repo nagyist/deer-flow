@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from deerflow.config.paths import get_paths
 
@@ -28,6 +28,8 @@ def validate_agent_name(name: str | None) -> str | None:
 
 class AgentConfig(BaseModel):
     """Configuration for a custom agent."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     description: str = ""

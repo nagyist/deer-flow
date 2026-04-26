@@ -10,6 +10,16 @@ import deerflow.community.jina_ai.jina_client as jina_client_module
 from deerflow.community.jina_ai.jina_client import JinaClient
 from deerflow.community.jina_ai.tools import web_fetch_tool
 
+# --- Phase 2 test helper: injected runtime for community tools ---
+from types import SimpleNamespace as _P2NS
+from deerflow.config.app_config import AppConfig as _P2AppConfig
+from deerflow.config.sandbox_config import SandboxConfig as _P2SandboxConfig
+from deerflow.config.deer_flow_context import DeerFlowContext as _P2Ctx
+_P2_APP_CONFIG = _P2AppConfig(sandbox=_P2SandboxConfig(use="test"))
+_P2_RUNTIME = _P2NS(context=_P2Ctx(app_config=_P2_APP_CONFIG, thread_id="test-thread"))
+# -------------------------------------------------------------------
+
+
 
 @pytest.fixture
 def jina_client():
@@ -176,9 +186,8 @@ async def test_web_fetch_tool_returns_error_on_crawl_failure(monkeypatch):
 
     mock_config = MagicMock()
     mock_config.get_tool_config.return_value = None
-    monkeypatch.setattr("deerflow.community.jina_ai.tools.get_app_config", lambda: mock_config)
     monkeypatch.setattr(JinaClient, "crawl", mock_crawl)
-    result = await web_fetch_tool.ainvoke("https://example.com")
+    result = await web_fetch_tool.coroutine(url="https://example.com", runtime=_P2_RUNTIME)
     assert result.startswith("Error:")
     assert "429" in result
 
@@ -192,9 +201,8 @@ async def test_web_fetch_tool_returns_markdown_on_success(monkeypatch):
 
     mock_config = MagicMock()
     mock_config.get_tool_config.return_value = None
-    monkeypatch.setattr("deerflow.community.jina_ai.tools.get_app_config", lambda: mock_config)
     monkeypatch.setattr(JinaClient, "crawl", mock_crawl)
-    result = await web_fetch_tool.ainvoke("https://example.com")
+    result = await web_fetch_tool.coroutine(url="https://example.com", runtime=_P2_RUNTIME)
     assert "Hello world" in result
     assert not result.startswith("Error:")
 

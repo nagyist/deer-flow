@@ -3,23 +3,31 @@ import time
 from unittest.mock import MagicMock, patch
 
 from deerflow.agents.memory.queue import ConversationContext, MemoryUpdateQueue
+from deerflow.config.app_config import AppConfig
 from deerflow.config.memory_config import MemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig
 
 
-def _memory_config(**overrides: object) -> MemoryConfig:
-    config = MemoryConfig()
-    for key, value in overrides.items():
-        setattr(config, key, value)
-    return config
+
+# --- Phase 2 config-refactor test helper ---
+# Memory APIs now take MemoryConfig / AppConfig explicitly. Tests construct a
+# minimal config once and reuse it across call sites.
+from deerflow.config.app_config import AppConfig as _TestAppConfig
+from deerflow.config.memory_config import MemoryConfig as _TestMemoryConfig
+from deerflow.config.sandbox_config import SandboxConfig as _TestSandboxConfig
+
+_TEST_MEMORY_CONFIG = _TestMemoryConfig(enabled=True)
+_TEST_APP_CONFIG = _TestAppConfig(sandbox=_TestSandboxConfig(use="test"), memory=_TEST_MEMORY_CONFIG)
+# -------------------------------------------
+
+def _make_config(**memory_overrides) -> AppConfig:
+    return AppConfig(sandbox=SandboxConfig(use="test"), memory=MemoryConfig(**memory_overrides))
 
 
 def test_queue_add_preserves_existing_correction_flag_for_same_thread() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
 
-    with (
-        patch("deerflow.agents.memory.queue.get_memory_config", return_value=_memory_config(enabled=True)),
-        patch.object(queue, "_reset_timer"),
-    ):
+    with patch.object(queue, "_reset_timer"):
         queue.add(thread_id="thread-1", messages=["first"], correction_detected=True)
         queue.add(thread_id="thread-1", messages=["second"], correction_detected=False)
 
@@ -29,7 +37,7 @@ def test_queue_add_preserves_existing_correction_flag_for_same_thread() -> None:
 
 
 def test_process_queue_forwards_correction_flag_to_updater() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
     queue._queue = [
         ConversationContext(
             thread_id="thread-1",
@@ -50,16 +58,14 @@ def test_process_queue_forwards_correction_flag_to_updater() -> None:
         agent_name="lead_agent",
         correction_detected=True,
         reinforcement_detected=False,
+        user_id=None,
     )
 
 
 def test_queue_add_preserves_existing_reinforcement_flag_for_same_thread() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
 
-    with (
-        patch("deerflow.agents.memory.queue.get_memory_config", return_value=_memory_config(enabled=True)),
-        patch.object(queue, "_reset_timer"),
-    ):
+    with patch.object(queue, "_reset_timer"):
         queue.add(thread_id="thread-1", messages=["first"], reinforcement_detected=True)
         queue.add(thread_id="thread-1", messages=["second"], reinforcement_detected=False)
 
@@ -69,7 +75,7 @@ def test_queue_add_preserves_existing_reinforcement_flag_for_same_thread() -> No
 
 
 def test_process_queue_forwards_reinforcement_flag_to_updater() -> None:
-    queue = MemoryUpdateQueue()
+    queue = MemoryUpdateQueue(_TEST_APP_CONFIG)
     queue._queue = [
         ConversationContext(
             thread_id="thread-1",
@@ -90,6 +96,7 @@ def test_process_queue_forwards_reinforcement_flag_to_updater() -> None:
         agent_name="lead_agent",
         correction_detected=False,
         reinforcement_detected=True,
+        user_id=None,
     )
 
 

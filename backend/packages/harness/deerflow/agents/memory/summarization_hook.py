@@ -5,12 +5,19 @@ from __future__ import annotations
 from deerflow.agents.memory.message_processing import detect_correction, detect_reinforcement, filter_messages_for_memory
 from deerflow.agents.memory.queue import get_memory_queue
 from deerflow.agents.middlewares.summarization_middleware import SummarizationEvent
-from deerflow.config.memory_config import get_memory_config
+from deerflow.config.app_config import AppConfig
 
 
 def memory_flush_hook(event: SummarizationEvent) -> None:
-    """Flush messages about to be summarized into the memory queue."""
-    if not get_memory_config().enabled or not event.thread_id:
+    """Flush messages about to be summarized into the memory queue.
+
+    Reads ``AppConfig`` from disk on every invocation. This hook is fired by
+    ``SummarizationMiddleware`` which has no ergonomic way to thread an
+    explicit ``app_config`` through; ``AppConfig.from_file()`` is a pure load
+    so the cost is acceptable for this rare pre-summarization callback.
+    """
+    app_config = AppConfig.from_file()
+    if not app_config.memory.enabled or not event.thread_id:
         return
 
     filtered_messages = filter_messages_for_memory(list(event.messages_to_summarize))
@@ -21,7 +28,7 @@ def memory_flush_hook(event: SummarizationEvent) -> None:
 
     correction_detected = detect_correction(filtered_messages)
     reinforcement_detected = not correction_detected and detect_reinforcement(filtered_messages)
-    queue = get_memory_queue()
+    queue = get_memory_queue(app_config)
     queue.add_nowait(
         thread_id=event.thread_id,
         messages=filtered_messages,

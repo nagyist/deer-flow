@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from deerflow.config.acp_config import ACPAgentConfig
-from deerflow.config.extensions_config import ExtensionsConfig, McpServerConfig, set_extensions_config
+from deerflow.config.extensions_config import ExtensionsConfig, McpServerConfig
 from deerflow.tools.builtins.invoke_acp_agent_tool import (
     _build_acp_mcp_servers,
     _build_mcp_servers,
@@ -18,7 +18,6 @@ from deerflow.tools.tools import get_available_tools
 
 
 def test_build_mcp_servers_filters_disabled_and_maps_transports():
-    set_extensions_config(ExtensionsConfig(mcp_servers={"stale": McpServerConfig(enabled=True, type="stdio", command="echo")}, skills={}))
     fresh_config = ExtensionsConfig(
         mcp_servers={
             "stdio": McpServerConfig(enabled=True, type="stdio", command="npx", args=["srv"]),
@@ -40,11 +39,9 @@ def test_build_mcp_servers_filters_disabled_and_maps_transports():
         }
     finally:
         monkeypatch.undo()
-        set_extensions_config(ExtensionsConfig(mcp_servers={}, skills={}))
 
 
 def test_build_acp_mcp_servers_formats_list_payload():
-    set_extensions_config(ExtensionsConfig(mcp_servers={"stale": McpServerConfig(enabled=True, type="stdio", command="echo")}, skills={}))
     fresh_config = ExtensionsConfig(
         mcp_servers={
             "stdio": McpServerConfig(enabled=True, type="stdio", command="npx", args=["srv"], env={"FOO": "bar"}),
@@ -77,7 +74,6 @@ def test_build_acp_mcp_servers_formats_list_payload():
         ]
     finally:
         monkeypatch.undo()
-        set_extensions_config(ExtensionsConfig(mcp_servers={}, skills={}))
 
 
 def test_build_permission_response_prefers_allow_once():
@@ -152,8 +148,10 @@ def test_get_work_dir_uses_base_dir_when_no_thread_id(monkeypatch, tmp_path):
 def test_get_work_dir_uses_per_thread_path_when_thread_id_given(monkeypatch, tmp_path):
     """P1.1: _get_work_dir(thread_id) uses {base_dir}/threads/{thread_id}/acp-workspace/."""
     from deerflow.config import paths as paths_module
+    from deerflow.runtime import user_context as uc_module
 
     monkeypatch.setattr(paths_module, "get_paths", lambda: paths_module.Paths(base_dir=tmp_path))
+    monkeypatch.setattr(uc_module, "get_effective_user_id", lambda: None)
     result = _get_work_dir("thread-abc-123")
     expected = tmp_path / "threads" / "thread-abc-123" / "acp-workspace"
     assert result == str(expected)
@@ -310,8 +308,10 @@ async def test_invoke_acp_agent_uses_fixed_acp_workspace(monkeypatch, tmp_path):
 async def test_invoke_acp_agent_uses_per_thread_workspace_when_thread_id_in_config(monkeypatch, tmp_path):
     """P1.1: When thread_id is in the RunnableConfig, ACP agent uses per-thread workspace."""
     from deerflow.config import paths as paths_module
+    from deerflow.runtime import user_context as uc_module
 
     monkeypatch.setattr(paths_module, "get_paths", lambda: paths_module.Paths(base_dir=tmp_path))
+    monkeypatch.setattr(uc_module, "get_effective_user_id", lambda: None)
 
     monkeypatch.setattr(
         "deerflow.config.extensions_config.ExtensionsConfig.from_file",
@@ -665,31 +665,23 @@ async def test_invoke_acp_agent_passes_none_env_when_not_configured(monkeypatch,
 
 
 def test_get_available_tools_includes_invoke_acp_agent_when_agents_configured(monkeypatch):
-    from deerflow.config.acp_config import load_acp_config_from_dict
-
-    load_acp_config_from_dict(
-        {
-            "codex": {
-                "command": "codex-acp",
-                "args": [],
-                "description": "Codex CLI",
-            }
-        }
-    )
-
     fake_config = SimpleNamespace(
         tools=[],
         models=[],
         tool_search=SimpleNamespace(enabled=False),
+        acp_agents={
+            "codex": ACPAgentConfig(
+                command="codex-acp",
+                args=[],
+                description="Codex CLI",
+            )
+        },
         get_model_config=lambda name: None,
     )
-    monkeypatch.setattr("deerflow.tools.tools.get_app_config", lambda: fake_config)
     monkeypatch.setattr(
         "deerflow.config.extensions_config.ExtensionsConfig.from_file",
         classmethod(lambda cls: ExtensionsConfig(mcp_servers={}, skills={})),
     )
 
-    tools = get_available_tools(include_mcp=True, subagent_enabled=False)
+    tools = get_available_tools(include_mcp=True, subagent_enabled=False, app_config=fake_config)
     assert "invoke_acp_agent" in [tool.name for tool in tools]
-
-    load_acp_config_from_dict({})

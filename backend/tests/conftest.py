@@ -7,6 +7,7 @@ issues when unit-testing lightweight config/registry code in isolation.
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -53,3 +54,71 @@ def provisioner_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# ---------------------------------------------------------------------------
+# Auto-set user context for every test unless marked no_auto_user
+# ---------------------------------------------------------------------------
+#
+# Repository methods read ``user_id`` from a contextvar by default
+# (see ``deerflow.runtime.user_context``). Without this fixture, every
+# pre-existing persistence test would raise RuntimeError because the
+# contextvar is unset. The fixture sets a default test user on every
+# test; tests that explicitly want to verify behaviour *without* a user
+# context should mark themselves ``@pytest.mark.no_auto_user``.
+
+
+@pytest.fixture(autouse=True)
+def _auto_app_config_from_file(monkeypatch, request):
+    """Replace ``AppConfig.from_file`` with a minimal factory so tests that
+    (directly or indirectly, e.g. via the LangGraph Server bootstrap path in
+    ``make_lead_agent``) load AppConfig from disk do not need a real
+    ``config.yaml`` on the filesystem.
+
+    Tests that want to verify the real ``from_file`` behaviour should mark
+    themselves with ``@pytest.mark.real_from_file``.
+    """
+    if request.node.get_closest_marker("real_from_file"):
+        yield
+        return
+    try:
+        from deerflow.config.app_config import AppConfig
+        from deerflow.config.sandbox_config import SandboxConfig
+    except ImportError:
+        yield
+        return
+
+    def _fake_from_file(config_path: str | None = None) -> AppConfig:  # noqa: ARG001
+        return AppConfig(sandbox=SandboxConfig(use="test"))
+
+    monkeypatch.setattr(AppConfig, "from_file", _fake_from_file)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _auto_user_context(request):
+    """Inject a default ``test-user-autouse`` into the contextvar.
+
+    Opt-out via ``@pytest.mark.no_auto_user``. Uses lazy import so that
+    tests which don't touch the persistence layer never pay the cost
+    of importing runtime.user_context.
+    """
+    if request.node.get_closest_marker("no_auto_user"):
+        yield
+        return
+
+    try:
+        from deerflow.runtime.user_context import (
+            reset_current_user,
+            set_current_user,
+        )
+    except ImportError:
+        yield
+        return
+
+    user = SimpleNamespace(id="test-user-autouse", email="test@local")
+    token = set_current_user(user)
+    try:
+        yield
+    finally:
+        reset_current_user(token)

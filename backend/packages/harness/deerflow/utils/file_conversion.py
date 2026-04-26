@@ -19,8 +19,6 @@ import logging
 import re
 from pathlib import Path
 
-from deerflow.config.app_config import get_app_config
-
 logger = logging.getLogger(__name__)
 
 # File extensions that should be converted to markdown
@@ -135,7 +133,7 @@ def _do_convert(file_path: Path, pdf_converter: str) -> str:
     return _convert_with_markitdown(file_path)
 
 
-async def convert_file_to_markdown(file_path: Path) -> Path | None:
+async def convert_file_to_markdown(file_path: Path, app_config: object | None = None) -> Path | None:
     """Convert a supported document file to Markdown.
 
     PDF files are handled with a two-converter strategy (see module docstring).
@@ -144,12 +142,14 @@ async def convert_file_to_markdown(file_path: Path) -> Path | None:
 
     Args:
         file_path: Path to the file to convert.
+        app_config: Optional AppConfig (for pdf_converter preference). When
+            omitted, defaults to ``auto``.
 
     Returns:
         Path to the generated .md file, or None if conversion failed.
     """
     try:
-        pdf_converter = _get_pdf_converter()
+        pdf_converter = _get_pdf_converter(app_config)
         file_size = file_path.stat().st_size
 
         if file_size > _ASYNC_THRESHOLD_BYTES:
@@ -288,28 +288,20 @@ def extract_outline(md_path: Path) -> list[dict]:
     return outline
 
 
-def _get_uploads_config_value(key: str, default: object) -> object:
-    """Read a value from the uploads config, supporting dict and attribute access."""
-    cfg = get_app_config()
-    uploads_cfg = getattr(cfg, "uploads", None)
-    if isinstance(uploads_cfg, dict):
-        return uploads_cfg.get(key, default)
-    return getattr(uploads_cfg, key, default)
-
-
-def _get_pdf_converter() -> str:
+def _get_pdf_converter(app_config: object | None) -> str:
     """Read pdf_converter setting from app config, defaulting to 'auto'.
 
     Normalizes the value to lowercase and validates it against the allowed set
     so that values like 'AUTO' or 'MarkItDown' from config.yaml don't silently
     fall through to unexpected behaviour.
     """
-    try:
-        raw = str(_get_uploads_config_value("pdf_converter", "auto")).strip().lower()
-        if raw not in _ALLOWED_PDF_CONVERTERS:
-            logger.warning("Invalid pdf_converter value %r; falling back to 'auto'", raw)
-            return "auto"
-        return raw
-    except Exception:
-        pass
-    return "auto"
+    if app_config is None:
+        return "auto"
+    uploads_cfg = getattr(app_config, "uploads", None)
+    if uploads_cfg is None:
+        return "auto"
+    raw = str(getattr(uploads_cfg, "pdf_converter", "auto")).strip().lower()
+    if raw not in _ALLOWED_PDF_CONVERTERS:
+        logger.warning("Invalid pdf_converter value %r; falling back to 'auto'", raw)
+        return "auto"
+    return raw

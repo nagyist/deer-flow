@@ -11,6 +11,7 @@ from langgraph.config import get_stream_writer
 from langgraph.typing import ContextT
 
 from deerflow.agents.thread_state import ThreadState
+from deerflow.config.deer_flow_context import resolve_context
 from deerflow.sandbox.security import LOCAL_BASH_SUBAGENT_DISABLED_MESSAGE, is_host_bash_allowed
 from deerflow.subagents import SubagentExecutor, get_available_subagent_names, get_subagent_config
 from deerflow.subagents.executor import SubagentStatus, cleanup_background_task, get_background_task_result, request_cancel_background_task
@@ -74,14 +75,15 @@ async def task_tool(
         subagent_type: The type of subagent to use. ALWAYS PROVIDE THIS PARAMETER THIRD.
         max_turns: Optional maximum number of agent turns. Defaults to subagent's configured max.
     """
-    available_subagent_names = get_available_subagent_names()
+    ctx = resolve_context(runtime)
+    available_subagent_names = get_available_subagent_names(ctx.app_config)
 
     # Get subagent configuration
-    config = get_subagent_config(subagent_type)
+    config = get_subagent_config(subagent_type, ctx.app_config)
     if config is None:
         available = ", ".join(available_subagent_names)
         return f"Error: Unknown subagent type '{subagent_type}'. Available: {available}"
-    if subagent_type == "bash" and not is_host_bash_allowed():
+    if subagent_type == "bash" and not is_host_bash_allowed(ctx.app_config):
         return f"Error: {LOCAL_BASH_SUBAGENT_DISABLED_MESSAGE}"
 
     # Build config overrides
@@ -105,9 +107,7 @@ async def task_tool(
     if runtime is not None:
         sandbox_state = runtime.state.get("sandbox")
         thread_data = runtime.state.get("thread_data")
-        thread_id = runtime.context.get("thread_id") if runtime.context else None
-        if thread_id is None:
-            thread_id = runtime.config.get("configurable", {}).get("thread_id")
+        thread_id = runtime.context.thread_id
 
         # Try to get parent model from configurable
         metadata = runtime.config.get("metadata", {})
@@ -131,12 +131,13 @@ async def task_tool(
     parent_tool_groups = metadata.get("tool_groups")
 
     # Subagents should not have subagent tools enabled (prevent recursive nesting)
-    tools = get_available_tools(model_name=parent_model, groups=parent_tool_groups, subagent_enabled=False)
+    tools = get_available_tools(model_name=parent_model, groups=parent_tool_groups, subagent_enabled=False, app_config=ctx.app_config)
 
     # Create executor
     executor = SubagentExecutor(
         config=config,
         tools=tools,
+        app_config=ctx.app_config,
         parent_model=parent_model,
         sandbox_state=sandbox_state,
         thread_data=thread_data,

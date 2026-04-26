@@ -333,12 +333,14 @@ class TestGuardrailsConfig:
         assert config.provider.use == "deerflow.guardrails.builtin:AllowlistProvider"
         assert config.provider.config == {"denied_tools": ["bash"]}
 
-    def test_singleton_load_and_get(self):
-        from deerflow.config.guardrails_config import get_guardrails_config, load_guardrails_config_from_dict, reset_guardrails_config
+    def test_guardrails_config_via_app_config(self):
+        from deerflow.config.app_config import AppConfig
+        from deerflow.config.guardrails_config import GuardrailProviderConfig, GuardrailsConfig
+        from deerflow.config.sandbox_config import SandboxConfig
 
-        try:
-            load_guardrails_config_from_dict({"enabled": True, "provider": {"use": "test:Foo"}})
-            config = get_guardrails_config()
-            assert config.enabled is True
-        finally:
-            reset_guardrails_config()
+        cfg = AppConfig(
+            sandbox=SandboxConfig(use="test"),
+            guardrails=GuardrailsConfig(enabled=True, provider=GuardrailProviderConfig(use="test:Foo")),
+        )
+        config = cfg.guardrails
+        assert config.enabled is True

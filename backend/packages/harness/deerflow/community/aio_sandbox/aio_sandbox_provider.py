@@ -25,8 +25,9 @@ except ImportError:  # pragma: no cover - Windows fallback
     fcntl = None  # type: ignore[assignment]
     import msvcrt
 
-from deerflow.config import get_app_config
+from deerflow.config.app_config import AppConfig
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
+from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.sandbox.sandbox import Sandbox
 from deerflow.sandbox.sandbox_provider import SandboxProvider
 
@@ -89,7 +90,8 @@ class AioSandboxProvider(SandboxProvider):
           API_KEY: $MY_API_KEY
     """
 
-    def __init__(self):
+    def __init__(self, app_config: "AppConfig"):
+        self._app_config = app_config
         self._lock = threading.Lock()
         self._sandboxes: dict[str, AioSandbox] = {}  # sandbox_id -> AioSandbox instance
         self._sandbox_infos: dict[str, SandboxInfo] = {}  # sandbox_id -> SandboxInfo (for destroy)
@@ -158,8 +160,7 @@ class AioSandboxProvider(SandboxProvider):
 
     def _load_config(self) -> dict:
         """Load sandbox configuration from app config."""
-        config = get_app_config()
-        sandbox_config = config.sandbox
+        sandbox_config = self._app_config.sandbox
 
         idle_timeout = getattr(sandbox_config, "idle_timeout", None)
         replicas = getattr(sandbox_config, "replicas", None)
@@ -270,28 +271,27 @@ class AioSandboxProvider(SandboxProvider):
         mounted Docker socket (DooD), the host Docker daemon can resolve the paths.
         """
         paths = get_paths()
-        paths.ensure_thread_dirs(thread_id)
+        user_id = get_effective_user_id()
+        paths.ensure_thread_dirs(thread_id, user_id=user_id)
 
         return [
-            (paths.host_sandbox_work_dir(thread_id), f"{VIRTUAL_PATH_PREFIX}/workspace", False),
-            (paths.host_sandbox_uploads_dir(thread_id), f"{VIRTUAL_PATH_PREFIX}/uploads", False),
-            (paths.host_sandbox_outputs_dir(thread_id), f"{VIRTUAL_PATH_PREFIX}/outputs", False),
+            (paths.host_sandbox_work_dir(thread_id, user_id=user_id), f"{VIRTUAL_PATH_PREFIX}/workspace", False),
+            (paths.host_sandbox_uploads_dir(thread_id, user_id=user_id), f"{VIRTUAL_PATH_PREFIX}/uploads", False),
+            (paths.host_sandbox_outputs_dir(thread_id, user_id=user_id), f"{VIRTUAL_PATH_PREFIX}/outputs", False),
             # ACP workspace: read-only inside the sandbox (lead agent reads results;
             # the ACP subprocess writes from the host side, not from within the container).
-            (paths.host_acp_workspace_dir(thread_id), "/mnt/acp-workspace", True),
+            (paths.host_acp_workspace_dir(thread_id, user_id=user_id), "/mnt/acp-workspace", True),
         ]
 
-    @staticmethod
-    def _get_skills_mount() -> tuple[str, str, bool] | None:
+    def _get_skills_mount(self) -> tuple[str, str, bool] | None:
         """Get the skills directory mount configuration.
 
         Mount source uses DEER_FLOW_HOST_SKILLS_PATH when running inside Docker (DooD)
         so the host Docker daemon can resolve the path.
         """
         try:
-            config = get_app_config()
-            skills_path = config.skills.get_skills_path()
-            container_path = config.skills.container_path
+            skills_path = self._app_config.skills.get_skills_path()
+            container_path = self._app_config.skills.container_path
 
             if skills_path.exists():
                 # When running inside Docker with DooD, use host-side skills path.
@@ -490,8 +490,9 @@ class AioSandboxProvider(SandboxProvider):
         across multiple processes, preventing container-name conflicts.
         """
         paths = get_paths()
-        paths.ensure_thread_dirs(thread_id)
-        lock_path = paths.thread_dir(thread_id) / f"{sandbox_id}.lock"
+        user_id = get_effective_user_id()
+        paths.ensure_thread_dirs(thread_id, user_id=user_id)
+        lock_path = paths.thread_dir(thread_id, user_id=user_id) / f"{sandbox_id}.lock"
 
         with open(lock_path, "a", encoding="utf-8") as lock_file:
             locked = False

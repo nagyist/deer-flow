@@ -3,14 +3,24 @@
 import importlib
 from types import SimpleNamespace
 
+from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import DeerFlowContext
+from deerflow.config.sandbox_config import SandboxConfig
+
 present_file_tool_module = importlib.import_module("deerflow.tools.builtins.present_file_tool")
+
+
+def _make_context(thread_id: str) -> DeerFlowContext:
+    return DeerFlowContext(
+        app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+        thread_id=thread_id,
+    )
 
 
 def _make_runtime(outputs_path: str) -> SimpleNamespace:
     return SimpleNamespace(
         state={"thread_data": {"outputs_path": outputs_path}},
-        context={"thread_id": "thread-1"},
-        config={},
+        context=_make_context("thread-1"),
     )
 
 
@@ -39,7 +49,7 @@ def test_present_files_keeps_virtual_outputs_path(tmp_path, monkeypatch):
     monkeypatch.setattr(
         present_file_tool_module,
         "get_paths",
-        lambda: SimpleNamespace(resolve_virtual_path=lambda thread_id, path: artifact_path),
+        lambda: SimpleNamespace(resolve_virtual_path=lambda thread_id, path, *, user_id=None: artifact_path),
     )
 
     result = present_file_tool_module.present_file_tool.func(
@@ -49,34 +59,6 @@ def test_present_files_keeps_virtual_outputs_path(tmp_path, monkeypatch):
     )
 
     assert result.update["artifacts"] == ["/mnt/user-data/outputs/summary.json"]
-
-
-def test_present_files_uses_config_thread_id_when_context_missing(tmp_path, monkeypatch):
-    outputs_dir = tmp_path / "threads" / "thread-from-config" / "user-data" / "outputs"
-    outputs_dir.mkdir(parents=True)
-    artifact_path = outputs_dir / "summary.json"
-    artifact_path.write_text("{}")
-
-    monkeypatch.setattr(
-        present_file_tool_module,
-        "get_paths",
-        lambda: SimpleNamespace(resolve_virtual_path=lambda thread_id, path: artifact_path),
-    )
-
-    runtime = SimpleNamespace(
-        state={"thread_data": {"outputs_path": str(outputs_dir)}},
-        context={},
-        config={"configurable": {"thread_id": "thread-from-config"}},
-    )
-
-    result = present_file_tool_module.present_file_tool.func(
-        runtime=runtime,
-        filepaths=["/mnt/user-data/outputs/summary.json"],
-        tool_call_id="tc-config",
-    )
-
-    assert result.update["artifacts"] == ["/mnt/user-data/outputs/summary.json"]
-    assert result.update["messages"][0].content == "Successfully presented files"
 
 
 def test_present_files_rejects_paths_outside_outputs(tmp_path):

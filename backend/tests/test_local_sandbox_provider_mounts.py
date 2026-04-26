@@ -1,6 +1,5 @@
 import errno
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -314,8 +313,7 @@ class TestLocalSandboxProviderMounts:
             sandbox=sandbox_config,
         )
 
-        with patch("deerflow.config.get_app_config", return_value=config):
-            provider = LocalSandboxProvider()
+        provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/custom-skills"]
 
@@ -336,8 +334,7 @@ class TestLocalSandboxProviderMounts:
             sandbox=sandbox_config,
         )
 
-        with patch("deerflow.config.get_app_config", return_value=config):
-            provider = LocalSandboxProvider()
+        provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills"]
 
@@ -360,8 +357,7 @@ class TestLocalSandboxProviderMounts:
             sandbox=sandbox_config,
         )
 
-        with patch("deerflow.config.get_app_config", return_value=config):
-            provider = LocalSandboxProvider()
+        provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills"]
 
@@ -476,7 +472,6 @@ class TestLocalSandboxProviderMounts:
             sandbox=sandbox_config,
         )
 
-        with patch("deerflow.config.get_app_config", return_value=config):
-            provider = LocalSandboxProvider()
+        provider = LocalSandboxProvider(app_config=config)
 
         assert [m.container_path for m in provider._path_mappings] == ["/mnt/skills", "/mnt/data"]

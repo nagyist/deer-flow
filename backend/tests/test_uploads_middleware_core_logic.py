@@ -13,7 +13,10 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage
 
 from deerflow.agents.middlewares.uploads_middleware import UploadsMiddleware
+from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import DeerFlowContext
 from deerflow.config.paths import Paths
+from deerflow.config.sandbox_config import SandboxConfig
 
 THREAD_ID = "thread-abc123"
 
@@ -23,18 +26,27 @@ THREAD_ID = "thread-abc123"
 # ---------------------------------------------------------------------------
 
 
+def _make_context(thread_id: str) -> DeerFlowContext:
+    return DeerFlowContext(
+        app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+        thread_id=thread_id,
+    )
+
+
 def _middleware(tmp_path: Path) -> UploadsMiddleware:
     return UploadsMiddleware(base_dir=str(tmp_path))
 
 
 def _runtime(thread_id: str | None = THREAD_ID) -> MagicMock:
     rt = MagicMock()
-    rt.context = {"thread_id": thread_id}
+    rt.context = _make_context(thread_id or "")
     return rt
 
 
 def _uploads_dir(tmp_path: Path, thread_id: str = THREAD_ID) -> Path:
-    d = Paths(str(tmp_path)).sandbox_uploads_dir(thread_id)
+    from deerflow.runtime.user_context import get_effective_user_id
+
+    d = Paths(str(tmp_path)).sandbox_uploads_dir(thread_id, user_id=get_effective_user_id())
     d.mkdir(parents=True, exist_ok=True)
     return d
 

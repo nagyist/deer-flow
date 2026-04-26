@@ -3,10 +3,12 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from deerflow.config.extensions_config import ExtensionsConfig, get_extensions_config, reload_extensions_config
+from app.gateway.deps import get_config
+from deerflow.config.app_config import AppConfig
+from deerflow.config.extensions_config import ExtensionsConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["mcp"])
@@ -69,7 +71,7 @@ class McpConfigUpdateRequest(BaseModel):
     summary="Get MCP Configuration",
     description="Retrieve the current Model Context Protocol (MCP) server configurations.",
 )
-async def get_mcp_configuration() -> McpConfigResponse:
+async def get_mcp_configuration(config: AppConfig = Depends(get_config)) -> McpConfigResponse:
     """Get the current MCP configuration.
 
     Returns:
@@ -90,9 +92,9 @@ async def get_mcp_configuration() -> McpConfigResponse:
         }
         ```
     """
-    config = get_extensions_config()
+    ext = config.extensions
 
-    return McpConfigResponse(mcp_servers={name: McpServerConfigResponse(**server.model_dump()) for name, server in config.mcp_servers.items()})
+    return McpConfigResponse(mcp_servers={name: McpServerConfigResponse(**server.model_dump()) for name, server in ext.mcp_servers.items()})
 
 
 @router.put(
@@ -101,7 +103,11 @@ async def get_mcp_configuration() -> McpConfigResponse:
     summary="Update MCP Configuration",
     description="Update Model Context Protocol (MCP) server configurations and save to file.",
 )
-async def update_mcp_configuration(request: McpConfigUpdateRequest) -> McpConfigResponse:
+async def update_mcp_configuration(
+    request: McpConfigUpdateRequest,
+    http_request: Request,
+    config: AppConfig = Depends(get_config),
+) -> McpConfigResponse:
     """Update the MCP configuration.
 
     This will:
@@ -142,13 +148,13 @@ async def update_mcp_configuration(request: McpConfigUpdateRequest) -> McpConfig
             config_path = Path.cwd().parent / "extensions_config.json"
             logger.info(f"No existing extensions config found. Creating new config at: {config_path}")
 
-        # Load current config to preserve skills configuration
-        current_config = get_extensions_config()
+        # Use injected config to preserve skills configuration
+        current_ext = config.extensions
 
         # Convert request to dict format for JSON serialization
         config_data = {
             "mcpServers": {name: server.model_dump() for name, server in request.mcp_servers.items()},
-            "skills": {name: {"enabled": skill.enabled} for name, skill in current_config.skills.items()},
+            "skills": {name: {"enabled": skill.enabled} for name, skill in current_ext.skills.items()},
         }
 
         # Write the configuration to file
@@ -160,9 +166,11 @@ async def update_mcp_configuration(request: McpConfigUpdateRequest) -> McpConfig
         # NOTE: No need to reload/reset cache here - LangGraph Server (separate process)
         # will detect config file changes via mtime and reinitialize MCP tools automatically
 
-        # Reload the configuration and update the global cache
-        reloaded_config = reload_extensions_config()
-        return McpConfigResponse(mcp_servers={name: McpServerConfigResponse(**server.model_dump()) for name, server in reloaded_config.mcp_servers.items()})
+        # Reload the configuration and swap ``app.state.config`` so subsequent
+        # ``Depends(get_config)`` calls see the refreshed value.
+        reloaded = AppConfig.from_file()
+        http_request.app.state.config = reloaded
+        return McpConfigResponse(mcp_servers={name: McpServerConfigResponse(**server.model_dump()) for name, server in reloaded.extensions.mcp_servers.items()})
 
     except Exception as e:
         logger.error(f"Failed to update MCP configuration: {e}", exc_info=True)

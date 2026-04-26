@@ -56,6 +56,10 @@ def _make_e2e_config() -> AppConfig:
     - ``E2E_BASE_URL``    (default: ``https://ark-cn-beijing.bytedance.net/api/v3``)
     - ``OPENAI_API_KEY``  (required for LLM tests)
     """
+    from deerflow.config.memory_config import MemoryConfig
+    from deerflow.config.summarization_config import SummarizationConfig
+    from deerflow.config.title_config import TitleConfig
+
     return AppConfig(
         models=[
             ModelConfig(
@@ -73,6 +77,9 @@ def _make_e2e_config() -> AppConfig:
             )
         ],
         sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider", allow_host_bash=True),
+        title=TitleConfig(enabled=False),
+        memory=MemoryConfig(enabled=False),
+        summarization=SummarizationConfig(enabled=False),
     )
 
 
@@ -87,7 +94,7 @@ def e2e_env(tmp_path, monkeypatch):
 
     - DEER_FLOW_HOME → tmp_path (all thread data lands in a temp dir)
     - Singletons reset so they pick up the new env
-    - Title/memory/summarization disabled to avoid extra LLM calls
+    - Title/memory/summarization disabled via AppConfig fields
     - AppConfig built programmatically (avoids config.yaml param-name issues)
     """
     # 1. Filesystem isolation
@@ -95,30 +102,12 @@ def e2e_env(tmp_path, monkeypatch):
     monkeypatch.setattr("deerflow.config.paths._paths", None)
     monkeypatch.setattr("deerflow.sandbox.sandbox_provider._default_sandbox_provider", None)
 
-    # 2. Inject a clean AppConfig via the global singleton.
-    config = _make_e2e_config()
-    monkeypatch.setattr("deerflow.config.app_config._app_config", config)
-    monkeypatch.setattr("deerflow.config.app_config._app_config_is_custom", True)
+    # 1b. Override the autouse ``AppConfig.from_file`` stub from conftest
+    #     (minimal test config) with the e2e-specific config that carries a
+    #     real model entry and disables title/memory/summarization.
+    monkeypatch.setattr(AppConfig, "from_file", staticmethod(lambda config_path=None: _make_e2e_config()))
 
-    # 3. Disable title generation (extra LLM call, non-deterministic)
-    from deerflow.config.title_config import TitleConfig
-
-    monkeypatch.setattr("deerflow.config.title_config._title_config", TitleConfig(enabled=False))
-
-    # 4. Disable memory queueing (avoids background threads & file writes)
-    from deerflow.config.memory_config import MemoryConfig
-
-    monkeypatch.setattr(
-        "deerflow.agents.middlewares.memory_middleware.get_memory_config",
-        lambda: MemoryConfig(enabled=False),
-    )
-
-    # 5. Ensure summarization is off (default, but be explicit)
-    from deerflow.config.summarization_config import SummarizationConfig
-
-    monkeypatch.setattr("deerflow.config.summarization_config._summarization_config", SummarizationConfig(enabled=False))
-
-    # 6. Exclude TitleMiddleware from the chain.
+    # 2. Exclude TitleMiddleware from the chain.
     #    It triggers an extra LLM call to generate a thread title, which adds
     #    non-determinism and cost to E2E tests (title generation is already
     #    disabled via TitleConfig above, but the middleware still participates
@@ -262,8 +251,9 @@ class TestFileUploadIntegration:
 
         # Physically exists
         from deerflow.config.paths import get_paths
+        from deerflow.runtime.user_context import get_effective_user_id
 
-        assert (get_paths().sandbox_uploads_dir(tid) / "readme.txt").exists()
+        assert (get_paths().sandbox_uploads_dir(tid, user_id=get_effective_user_id()) / "readme.txt").exists()
 
     def test_upload_duplicate_rename(self, e2e_env, tmp_path):
         """Uploading two files with the same name auto-renames the second."""
@@ -472,12 +462,13 @@ class TestArtifactAccess:
     def test_get_artifact_happy_path(self, e2e_env):
         """Write a file to outputs, then read it back via get_artifact()."""
         from deerflow.config.paths import get_paths
+        from deerflow.runtime.user_context import get_effective_user_id
 
         c = DeerFlowClient(checkpointer=None, thinking_enabled=False)
         tid = str(uuid.uuid4())
 
         # Create an output file in the thread's outputs directory
-        outputs_dir = get_paths().sandbox_outputs_dir(tid)
+        outputs_dir = get_paths().sandbox_outputs_dir(tid, user_id=get_effective_user_id())
         outputs_dir.mkdir(parents=True, exist_ok=True)
         (outputs_dir / "result.txt").write_text("hello artifact")
 
@@ -488,11 +479,12 @@ class TestArtifactAccess:
     def test_get_artifact_nested_path(self, e2e_env):
         """Artifacts in subdirectories are accessible."""
         from deerflow.config.paths import get_paths
+        from deerflow.runtime.user_context import get_effective_user_id
 
         c = DeerFlowClient(checkpointer=None, thinking_enabled=False)
         tid = str(uuid.uuid4())
 
-        outputs_dir = get_paths().sandbox_outputs_dir(tid)
+        outputs_dir = get_paths().sandbox_outputs_dir(tid, user_id=get_effective_user_id())
         sub = outputs_dir / "charts"
         sub.mkdir(parents=True, exist_ok=True)
         (sub / "data.json").write_text('{"x": 1}')
@@ -663,10 +655,9 @@ class TestConfigManagement:
         config_file.write_text(json.dumps({"mcpServers": {}, "skills": {}}))
         monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(config_file))
 
-        # Force reload so the singleton picks up our test file
-        from deerflow.config.extensions_config import reload_extensions_config
-
-        reload_extensions_config()
+        # Mock from_file so update_mcp_config's internal reload works without config.yaml
+        e2e_config = _make_e2e_config()
+        monkeypatch.setattr(AppConfig, "from_file", classmethod(lambda cls, path=None: e2e_config))
 
         c = DeerFlowClient(checkpointer=None, thinking_enabled=False)
         # Simulate a cached agent
@@ -690,9 +681,9 @@ class TestConfigManagement:
         config_file.write_text(json.dumps({"mcpServers": {}, "skills": {}}))
         monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(config_file))
 
-        from deerflow.config.extensions_config import reload_extensions_config
-
-        reload_extensions_config()
+        # Mock from_file so update_skill's internal reload works without config.yaml
+        e2e_config = _make_e2e_config()
+        monkeypatch.setattr(AppConfig, "from_file", classmethod(lambda cls, path=None: e2e_config))
 
         c = DeerFlowClient(checkpointer=None, thinking_enabled=False)
         c._agent = "fake-agent-placeholder"
@@ -717,10 +708,6 @@ class TestConfigManagement:
         config_file = tmp_path / "extensions_config.json"
         config_file.write_text(json.dumps({"mcpServers": {}, "skills": {}}))
         monkeypatch.setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", str(config_file))
-
-        from deerflow.config.extensions_config import reload_extensions_config
-
-        reload_extensions_config()
 
         c = DeerFlowClient(checkpointer=None, thinking_enabled=False)
         with pytest.raises(ValueError, match="not found"):

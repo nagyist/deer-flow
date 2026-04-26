@@ -14,6 +14,10 @@ def _make_runtime(tmp_path):
     workspace.mkdir()
     uploads.mkdir()
     outputs.mkdir()
+    from deerflow.config.app_config import AppConfig
+    from deerflow.config.deer_flow_context import DeerFlowContext
+    from deerflow.config.sandbox_config import SandboxConfig
+
     return SimpleNamespace(
         state={
             "sandbox": {"sandbox_id": "local"},
@@ -23,7 +27,10 @@ def _make_runtime(tmp_path):
                 "outputs_path": str(outputs),
             },
         },
-        context={"thread_id": "thread-1"},
+        context=DeerFlowContext(
+            app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+            thread_id="thread-1",
+        ),
     )
 
 
@@ -103,8 +110,6 @@ def test_grep_tool_truncates_results(tmp_path, monkeypatch) -> None:
     (workspace / "main.py").write_text("TODO one\nTODO two\nTODO three\n", encoding="utf-8")
 
     monkeypatch.setattr("deerflow.sandbox.tools.ensure_sandbox_initialized", lambda runtime: LocalSandbox(id="local"))
-    # Prevent config.yaml tool config from overriding the caller-supplied max_results=2.
-    monkeypatch.setattr("deerflow.sandbox.tools.get_app_config", lambda: SimpleNamespace(get_tool_config=lambda name: None))
 
     result = grep_tool.func(
         runtime=runtime,
@@ -324,10 +329,6 @@ def test_glob_tool_honors_smaller_requested_max_results(tmp_path, monkeypatch) -
     (workspace / "c.py").write_text("print('c')\n", encoding="utf-8")
 
     monkeypatch.setattr("deerflow.sandbox.tools.ensure_sandbox_initialized", lambda runtime: LocalSandbox(id="local"))
-    monkeypatch.setattr(
-        "deerflow.sandbox.tools.get_app_config",
-        lambda: SimpleNamespace(get_tool_config=lambda name: SimpleNamespace(model_extra={"max_results": 50})),
-    )
 
     result = glob_tool.func(
         runtime=runtime,

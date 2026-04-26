@@ -9,6 +9,7 @@ from langgraph.typing import ContextT
 
 from deerflow.agents.thread_state import ThreadState
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
+from deerflow.runtime.user_context import get_effective_user_id
 
 OUTPUTS_VIRTUAL_PREFIX = f"{VIRTUAL_PATH_PREFIX}/outputs"
 
@@ -51,7 +52,7 @@ def _normalize_presented_filepath(
     if runtime.state is None:
         raise ValueError("Thread runtime state is not available")
 
-    thread_id = _get_thread_id(runtime)
+    thread_id = runtime.context.thread_id
     if not thread_id:
         raise ValueError("Thread ID is not available in runtime context or runtime config")
 
@@ -65,7 +66,7 @@ def _normalize_presented_filepath(
     virtual_prefix = VIRTUAL_PATH_PREFIX.lstrip("/")
 
     if stripped == virtual_prefix or stripped.startswith(virtual_prefix + "/"):
-        actual_path = get_paths().resolve_virtual_path(thread_id, filepath)
+        actual_path = get_paths().resolve_virtual_path(thread_id, filepath, user_id=get_effective_user_id())
     else:
         actual_path = Path(filepath).expanduser().resolve()
 

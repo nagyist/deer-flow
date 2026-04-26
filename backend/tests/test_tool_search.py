@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool as langchain_tool
 
-from deerflow.config.tool_search_config import ToolSearchConfig, load_tool_search_config_from_dict
+from deerflow.config.tool_search_config import ToolSearchConfig
 from deerflow.tools.builtins.tool_search import (
     DeferredToolRegistry,
     get_deferred_registry,
@@ -64,12 +64,12 @@ class TestToolSearchConfig:
         config = ToolSearchConfig(enabled=True)
         assert config.enabled is True
 
-    def test_load_from_dict(self):
-        config = load_tool_search_config_from_dict({"enabled": True})
+    def test_validate_from_dict(self):
+        config = ToolSearchConfig.model_validate({"enabled": True})
         assert config.enabled is True
 
-    def test_load_from_empty_dict(self):
-        config = load_tool_search_config_from_dict({})
+    def test_validate_from_empty_dict(self):
+        config = ToolSearchConfig.model_validate({})
         assert config.enabled is False
 
 
@@ -266,48 +266,42 @@ class TestToolSearchTool:
 
 
 class TestDeferredToolsPromptSection:
-    @pytest.fixture(autouse=True)
-    def _mock_app_config(self, monkeypatch):
+    @pytest.fixture
+    def mock_config(self):
         """Provide a minimal AppConfig mock so tests don't need config.yaml."""
         from unittest.mock import MagicMock
 
         from deerflow.config.tool_search_config import ToolSearchConfig
 
-        mock_config = MagicMock()
-        mock_config.tool_search = ToolSearchConfig()  # disabled by default
-        monkeypatch.setattr("deerflow.config.get_app_config", lambda: mock_config)
+        config = MagicMock()
+        config.tool_search = ToolSearchConfig()  # disabled by default
+        return config
 
-    def test_empty_when_disabled(self):
+    def test_empty_when_disabled(self, mock_config):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
 
         # tool_search.enabled defaults to False
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(mock_config)
         assert section == ""
 
-    def test_empty_when_enabled_but_no_registry(self, monkeypatch):
+    def test_empty_when_enabled_but_no_registry(self, mock_config):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
-        from deerflow.config import get_app_config
-
-        monkeypatch.setattr(get_app_config().tool_search, "enabled", True)
-        section = get_deferred_tools_prompt_section()
+        mock_config.tool_search = ToolSearchConfig(enabled=True)
+        section = get_deferred_tools_prompt_section(mock_config)
         assert section == ""
 
-    def test_empty_when_enabled_but_empty_registry(self, monkeypatch):
+    def test_empty_when_enabled_but_empty_registry(self, mock_config):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
-        from deerflow.config import get_app_config
-
-        monkeypatch.setattr(get_app_config().tool_search, "enabled", True)
+        mock_config.tool_search = ToolSearchConfig(enabled=True)
         set_deferred_registry(DeferredToolRegistry())
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(mock_config)
         assert section == ""
 
-    def test_lists_tool_names(self, registry, monkeypatch):
+    def test_lists_tool_names(self, registry, mock_config):
         from deerflow.agents.lead_agent.prompt import get_deferred_tools_prompt_section
-        from deerflow.config import get_app_config
-
-        monkeypatch.setattr(get_app_config().tool_search, "enabled", True)
+        mock_config.tool_search = ToolSearchConfig(enabled=True)
         set_deferred_registry(registry)
-        section = get_deferred_tools_prompt_section()
+        section = get_deferred_tools_prompt_section(mock_config)
         assert "<available-deferred-tools>" in section
         assert "</available-deferred-tools>" in section
         assert "github_create_issue" in section

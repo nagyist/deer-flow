@@ -21,7 +21,8 @@ from deerflow.agents.memory.storage import (
     get_memory_storage,
     utc_now_iso_z,
 )
-from deerflow.config.memory_config import get_memory_config
+from deerflow.config.app_config import AppConfig
+from deerflow.config.memory_config import MemoryConfig
 from deerflow.models import create_chat_model
 
 logger = logging.getLogger(__name__)
@@ -38,44 +39,33 @@ def _create_empty_memory() -> dict[str, Any]:
     return create_empty_memory()
 
 
-def _save_memory_to_file(memory_data: dict[str, Any], agent_name: str | None = None) -> bool:
-    """Backward-compatible wrapper around the configured memory storage save path."""
-    return get_memory_storage().save(memory_data, agent_name)
+def _save_memory_to_file(memory_config: MemoryConfig, memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> bool:
+    """Save via the configured memory storage."""
+    return get_memory_storage(memory_config).save(memory_data, agent_name, user_id=user_id)
 
 
-def get_memory_data(agent_name: str | None = None) -> dict[str, Any]:
+def get_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Get the current memory data via storage provider."""
-    return get_memory_storage().load(agent_name)
+    return get_memory_storage(memory_config).load(agent_name, user_id=user_id)
 
 
-def reload_memory_data(agent_name: str | None = None) -> dict[str, Any]:
+def reload_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Reload memory data via storage provider."""
-    return get_memory_storage().reload(agent_name)
+    return get_memory_storage(memory_config).reload(agent_name, user_id=user_id)
 
 
-def import_memory_data(memory_data: dict[str, Any], agent_name: str | None = None) -> dict[str, Any]:
-    """Persist imported memory data via storage provider.
-
-    Args:
-        memory_data: Full memory payload to persist.
-        agent_name: If provided, imports into per-agent memory.
-
-    Returns:
-        The saved memory data after storage normalization.
-
-    Raises:
-        OSError: If persisting the imported memory fails.
-    """
-    storage = get_memory_storage()
-    if not storage.save(memory_data, agent_name):
+def import_memory_data(memory_config: MemoryConfig, memory_data: dict[str, Any], agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
+    """Persist imported memory data via storage provider."""
+    storage = get_memory_storage(memory_config)
+    if not storage.save(memory_data, agent_name, user_id=user_id):
         raise OSError("Failed to save imported memory data")
-    return storage.load(agent_name)
+    return storage.load(agent_name, user_id=user_id)
 
 
-def clear_memory_data(agent_name: str | None = None) -> dict[str, Any]:
+def clear_memory_data(memory_config: MemoryConfig, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Clear all stored memory data and persist an empty structure."""
     cleared_memory = create_empty_memory()
-    if not _save_memory_to_file(cleared_memory, agent_name):
+    if not _save_memory_to_file(memory_config, cleared_memory, agent_name, user_id=user_id):
         raise OSError("Failed to save cleared memory data")
     return cleared_memory
 
@@ -88,10 +78,13 @@ def _validate_confidence(confidence: float) -> float:
 
 
 def create_memory_fact(
+    memory_config: MemoryConfig,
     content: str,
     category: str = "context",
     confidence: float = 0.5,
     agent_name: str | None = None,
+    *,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a new fact and persist the updated memory data."""
     normalized_content = content.strip()
@@ -101,7 +94,7 @@ def create_memory_fact(
     normalized_category = category.strip() or "context"
     validated_confidence = _validate_confidence(confidence)
     now = utc_now_iso_z()
-    memory_data = get_memory_data(agent_name)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     updated_memory = dict(memory_data)
     facts = list(memory_data.get("facts", []))
     facts.append(
@@ -116,15 +109,15 @@ def create_memory_fact(
     )
     updated_memory["facts"] = facts
 
-    if not _save_memory_to_file(updated_memory, agent_name):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError("Failed to save memory data after creating fact")
 
     return updated_memory
 
 
-def delete_memory_fact(fact_id: str, agent_name: str | None = None) -> dict[str, Any]:
+def delete_memory_fact(memory_config: MemoryConfig, fact_id: str, agent_name: str | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Delete a fact by its id and persist the updated memory data."""
-    memory_data = get_memory_data(agent_name)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     facts = memory_data.get("facts", [])
     updated_facts = [fact for fact in facts if fact.get("id") != fact_id]
     if len(updated_facts) == len(facts):
@@ -133,21 +126,24 @@ def delete_memory_fact(fact_id: str, agent_name: str | None = None) -> dict[str,
     updated_memory = dict(memory_data)
     updated_memory["facts"] = updated_facts
 
-    if not _save_memory_to_file(updated_memory, agent_name):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError(f"Failed to save memory data after deleting fact '{fact_id}'")
 
     return updated_memory
 
 
 def update_memory_fact(
+    memory_config: MemoryConfig,
     fact_id: str,
     content: str | None = None,
     category: str | None = None,
     confidence: float | None = None,
     agent_name: str | None = None,
+    *,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Update an existing fact and persist the updated memory data."""
-    memory_data = get_memory_data(agent_name)
+    memory_data = get_memory_data(memory_config, agent_name, user_id=user_id)
     updated_memory = dict(memory_data)
     updated_facts: list[dict[str, Any]] = []
     found = False
@@ -174,7 +170,7 @@ def update_memory_fact(
 
     updated_memory["facts"] = updated_facts
 
-    if not _save_memory_to_file(updated_memory, agent_name):
+    if not _save_memory_to_file(memory_config, updated_memory, agent_name, user_id=user_id):
         raise OSError(f"Failed to save memory data after updating fact '{fact_id}'")
 
     return updated_memory
@@ -299,19 +295,25 @@ def _fact_content_key(content: Any) -> str | None:
 class MemoryUpdater:
     """Updates memory using LLM based on conversation context."""
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, app_config: AppConfig, model_name: str | None = None):
         """Initialize the memory updater.
 
         Args:
+            app_config: Application config (the updater needs both ``memory``
+                section for behavior and the full config for ``create_chat_model``).
             model_name: Optional model name to use. If None, uses config or default.
         """
+        self._app_config = app_config
         self._model_name = model_name
+
+    @property
+    def _memory_config(self) -> MemoryConfig:
+        return self._app_config.memory
 
     def _get_model(self):
         """Get the model for memory updates."""
-        config = get_memory_config()
-        model_name = self._model_name or config.model_name
-        return create_chat_model(name=model_name, thinking_enabled=False)
+        model_name = self._model_name or self._memory_config.model_name
+        return create_chat_model(name=model_name, thinking_enabled=False, app_config=self._app_config)
 
     def _build_correction_hint(
         self,
@@ -344,13 +346,14 @@ class MemoryUpdater:
         agent_name: str | None,
         correction_detected: bool,
         reinforcement_detected: bool,
+        user_id: str | None = None,
     ) -> tuple[dict[str, Any], str] | None:
         """Load memory and build the update prompt for a conversation."""
-        config = get_memory_config()
+        config = self._memory_config
         if not config.enabled or not messages:
             return None
 
-        current_memory = get_memory_data(agent_name)
+        current_memory = get_memory_data(config, agent_name, user_id=user_id)
         conversation_text = format_conversation_for_update(messages)
         if not conversation_text.strip():
             return None
@@ -372,6 +375,7 @@ class MemoryUpdater:
         response_content: Any,
         thread_id: str | None,
         agent_name: str | None,
+        user_id: str | None = None,
     ) -> bool:
         """Parse the model response, apply updates, and persist memory."""
         response_text = _extract_text(response_content).strip()
@@ -385,7 +389,7 @@ class MemoryUpdater:
         # cannot corrupt the still-cached original object reference.
         updated_memory = self._apply_updates(copy.deepcopy(current_memory), update_data, thread_id)
         updated_memory = _strip_upload_mentions_from_memory(updated_memory)
-        return get_memory_storage().save(updated_memory, agent_name)
+        return get_memory_storage(self._memory_config).save(updated_memory, agent_name, user_id=user_id)
 
     async def aupdate_memory(
         self,
@@ -394,6 +398,7 @@ class MemoryUpdater:
         agent_name: str | None = None,
         correction_detected: bool = False,
         reinforcement_detected: bool = False,
+        user_id: str | None = None,
     ) -> bool:
         """Update memory asynchronously based on conversation messages."""
         try:
@@ -403,6 +408,7 @@ class MemoryUpdater:
                 agent_name=agent_name,
                 correction_detected=correction_detected,
                 reinforcement_detected=reinforcement_detected,
+                user_id=user_id,
             )
             if prepared is None:
                 return False
@@ -416,6 +422,7 @@ class MemoryUpdater:
                 response_content=response.content,
                 thread_id=thread_id,
                 agent_name=agent_name,
+                user_id=user_id,
             )
         except json.JSONDecodeError as e:
             logger.warning("Failed to parse LLM response for memory update: %s", e)
@@ -431,6 +438,7 @@ class MemoryUpdater:
         agent_name: str | None = None,
         correction_detected: bool = False,
         reinforcement_detected: bool = False,
+        user_id: str | None = None,
     ) -> bool:
         """Synchronously update memory via the async updater path.
 
@@ -440,19 +448,83 @@ class MemoryUpdater:
             agent_name: If provided, updates per-agent memory. If None, updates global memory.
             correction_detected: Whether recent turns include an explicit correction signal.
             reinforcement_detected: Whether recent turns include a positive reinforcement signal.
+            user_id: If provided, scopes memory to a specific user.
 
         Returns:
             True if update was successful, False otherwise.
         """
-        return _run_async_update_sync(
-            self.aupdate_memory(
-                messages=messages,
-                thread_id=thread_id,
-                agent_name=agent_name,
-                correction_detected=correction_detected,
-                reinforcement_detected=reinforcement_detected,
+        config = self._memory_config
+        if not config.enabled:
+            return False
+
+        if not messages:
+            return False
+
+        try:
+            # Get current memory
+            current_memory = get_memory_data(config, agent_name, user_id=user_id)
+
+            # Format conversation for prompt
+            conversation_text = format_conversation_for_update(messages)
+
+            if not conversation_text.strip():
+                return False
+
+            # Build prompt
+            correction_hint = ""
+            if correction_detected:
+                correction_hint = (
+                    "IMPORTANT: Explicit correction signals were detected in this conversation. "
+                    "Pay special attention to what the agent got wrong, what the user corrected, "
+                    "and record the correct approach as a fact with category "
+                    '"correction" and confidence >= 0.95 when appropriate.'
+                )
+            if reinforcement_detected:
+                reinforcement_hint = (
+                    "IMPORTANT: Positive reinforcement signals were detected in this conversation. "
+                    "The user explicitly confirmed the agent's approach was correct or helpful. "
+                    "Record the confirmed approach, style, or preference as a fact with category "
+                    '"preference" or "behavior" and confidence >= 0.9 when appropriate.'
+                )
+                correction_hint = (correction_hint + "\n" + reinforcement_hint).strip() if correction_hint else reinforcement_hint
+
+            prompt = MEMORY_UPDATE_PROMPT.format(
+                current_memory=json.dumps(current_memory, indent=2),
+                conversation=conversation_text,
+                correction_hint=correction_hint,
             )
-        )
+
+            # Call LLM
+            model = self._get_model()
+            response = model.invoke(prompt)
+            response_text = _extract_text(response.content).strip()
+
+            # Parse response
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+            update_data = json.loads(response_text)
+
+            # Apply updates
+            updated_memory = self._apply_updates(current_memory, update_data, thread_id)
+
+            # Strip file-upload mentions from all summaries before saving.
+            # Uploaded files are session-scoped and won't exist in future sessions,
+            # so recording upload events in long-term memory causes the agent to
+            # try (and fail) to locate those files in subsequent conversations.
+            updated_memory = _strip_upload_mentions_from_memory(updated_memory)
+
+            # Save
+            return get_memory_storage(config).save(updated_memory, agent_name, user_id=user_id)
+
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse LLM response for memory update: %s", e)
+            return False
+        except Exception as e:
+            logger.exception("Memory update failed: %s", e)
+            return False
 
     def _apply_updates(
         self,
@@ -470,7 +542,7 @@ class MemoryUpdater:
         Returns:
             Updated memory data.
         """
-        config = get_memory_config()
+        config = self._memory_config
         now = utc_now_iso_z()
 
         # Update user sections
@@ -547,6 +619,7 @@ def update_memory_from_conversation(
     agent_name: str | None = None,
     correction_detected: bool = False,
     reinforcement_detected: bool = False,
+    user_id: str | None = None,
 ) -> bool:
     """Convenience function to update memory from a conversation.
 
@@ -556,9 +629,10 @@ def update_memory_from_conversation(
         agent_name: If provided, updates per-agent memory. If None, updates global memory.
         correction_detected: Whether recent turns include an explicit correction signal.
         reinforcement_detected: Whether recent turns include a positive reinforcement signal.
+        user_id: If provided, scopes memory to a specific user.
 
     Returns:
         True if successful, False otherwise.
     """
     updater = MemoryUpdater()
-    return updater.update_memory(messages, thread_id, agent_name, correction_detected, reinforcement_detected)
+    return updater.update_memory(messages, thread_id, agent_name, correction_detected, reinforcement_detected, user_id=user_id)

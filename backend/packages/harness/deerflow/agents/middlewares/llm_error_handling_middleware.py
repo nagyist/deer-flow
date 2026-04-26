@@ -20,7 +20,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import AIMessage
 from langgraph.errors import GraphBubbleUp
 
-from deerflow.config import get_app_config
+from deerflow.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
         # Load Circuit Breaker configs from app config if available, fall back to defaults
         try:
-            app_config = get_app_config()
+            app_config = AppConfig.from_file()
             self.circuit_failure_threshold = app_config.circuit_breaker.failure_threshold
             self.circuit_recovery_timeout_sec = app_config.circuit_breaker.recovery_timeout_sec
         except (FileNotFoundError, RuntimeError):

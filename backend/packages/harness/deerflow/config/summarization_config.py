@@ -2,13 +2,15 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 ContextSizeType = Literal["fraction", "tokens", "messages"]
 
 
 class ContextSize(BaseModel):
     """Context size specification for trigger or keep parameters."""
+
+    model_config = ConfigDict(frozen=True)
 
     type: ContextSizeType = Field(description="Type of context size specification")
     value: int | float = Field(description="Value for the context size specification")
@@ -20,6 +22,8 @@ class ContextSize(BaseModel):
 
 class SummarizationConfig(BaseModel):
     """Configuration for automatic conversation summarization."""
+
+    model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(
         default=False,
@@ -70,24 +74,3 @@ class SummarizationConfig(BaseModel):
         default_factory=lambda: ["read_file", "read", "view", "cat"],
         description="Tool names treated as skill file reads when preserving recently-loaded skills across summarization.",
     )
-
-
-# Global configuration instance
-_summarization_config: SummarizationConfig = SummarizationConfig()
-
-
-def get_summarization_config() -> SummarizationConfig:
-    """Get the current summarization configuration."""
-    return _summarization_config
-
-
-def set_summarization_config(config: SummarizationConfig) -> None:
-    """Set the summarization configuration."""
-    global _summarization_config
-    _summarization_config = config
-
-
-def load_summarization_config_from_dict(config_dict: dict) -> None:
-    """Load summarization configuration from a dictionary."""
-    global _summarization_config
-    _summarization_config = SummarizationConfig(**config_dict)

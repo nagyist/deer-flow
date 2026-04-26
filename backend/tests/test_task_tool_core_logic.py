@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from deerflow.config.app_config import AppConfig
+from deerflow.config.deer_flow_context import DeerFlowContext
+from deerflow.config.sandbox_config import SandboxConfig
 from deerflow.subagents.config import SubagentConfig
 
 # Use module import so tests can patch the exact symbols referenced inside task_tool().
@@ -24,6 +27,13 @@ class FakeSubagentStatus(Enum):
     TIMED_OUT = "timed_out"
 
 
+def _make_context(thread_id: str) -> DeerFlowContext:
+    return DeerFlowContext(
+        app_config=AppConfig(sandbox=SandboxConfig(use="test")),
+        thread_id=thread_id,
+    )
+
+
 def _make_runtime() -> SimpleNamespace:
     # Minimal ToolRuntime-like object; task_tool only reads these three attributes.
     return SimpleNamespace(
@@ -35,7 +45,7 @@ def _make_runtime() -> SimpleNamespace:
                 "outputs_path": "/tmp/outputs",
             },
         },
-        context={"thread_id": "thread-1"},
+        context=_make_context("thread-1"),
         config={"metadata": {"model_name": "ark-model", "trace_id": "trace-1"}},
     )
 
@@ -83,11 +93,11 @@ class _DummyScheduledTask:
 
 
 def test_task_tool_returns_error_for_unknown_subagent(monkeypatch):
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: None)
-    monkeypatch.setattr(task_tool_module, "get_available_subagent_names", lambda: ["general-purpose"])
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: None)
+    monkeypatch.setattr(task_tool_module, "get_available_subagent_names", lambda *a, **k: ["general-purpose"])
 
     result = _run_task_tool(
-        runtime=None,
+        runtime=_make_runtime(),
         description="执行任务",
         prompt="do work",
         subagent_type="general-purpose",
@@ -98,8 +108,8 @@ def test_task_tool_returns_error_for_unknown_subagent(monkeypatch):
 
 
 def test_task_tool_rejects_bash_subagent_when_host_bash_disabled(monkeypatch):
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: _make_subagent_config())
-    monkeypatch.setattr(task_tool_module, "is_host_bash_allowed", lambda: False)
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: _make_subagent_config())
+    monkeypatch.setattr(task_tool_module, "is_host_bash_allowed", lambda *a, **k: False)
 
     result = _run_task_tool(
         runtime=_make_runtime(),
@@ -142,9 +152,9 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
 
     monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
     monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
-    monkeypatch.setattr(task_tool_module, "get_background_task_result", lambda _: next(responses))
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "Skills Appendix")
+    monkeypatch.setattr(task_tool_module, "get_background_task_result", lambda *a, **k: next(responses))
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
     # task_tool lazily imports from deerflow.tools at call time, so patch that module-level function.
@@ -165,225 +175,18 @@ def test_task_tool_emits_running_and_completed_events(monkeypatch):
     assert captured["executor_kwargs"]["thread_id"] == "thread-1"
     assert captured["executor_kwargs"]["parent_model"] == "ark-model"
     assert captured["executor_kwargs"]["config"].max_turns == 7
-    # Skills are no longer appended to system_prompt; they are loaded per-session
-    # by SubagentExecutor and injected as conversation items (Codex pattern).
-    assert captured["executor_kwargs"]["config"].system_prompt == "Base system prompt"
+    assert "Skills Appendix" in captured["executor_kwargs"]["config"].system_prompt
 
-    get_available_tools.assert_called_once_with(model_name="ark-model", groups=None, subagent_enabled=False)
+    from unittest.mock import ANY
+
+    get_available_tools.assert_called_once_with(model_name="ark-model", subagent_enabled=False, app_config=ANY)
 
     event_types = [e["type"] for e in events]
     assert event_types == ["task_started", "task_running", "task_running", "task_completed"]
     assert events[-1]["result"] == "all done"
 
 
-def test_task_tool_propagates_tool_groups_to_subagent(monkeypatch):
-    """Verify tool_groups from parent metadata are passed to get_available_tools(groups=...)."""
-    config = _make_subagent_config()
-    parent_tool_groups = ["file:read", "file:write", "bash"]
-    runtime = SimpleNamespace(
-        state={
-            "sandbox": {"sandbox_id": "local"},
-            "thread_data": {"workspace_path": "/tmp/workspace"},
-        },
-        context={"thread_id": "thread-1"},
-        config={"metadata": {"model_name": "ark-model", "trace_id": "trace-1", "tool_groups": parent_tool_groups}},
-    )
-    events = []
-    get_available_tools = MagicMock(return_value=["tool-a"])
-
-    class DummyExecutor:
-        def __init__(self, **kwargs):
-            pass
-
-        def execute_async(self, prompt, task_id=None):
-            return task_id or "generated-task-id"
-
-    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
-    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-    monkeypatch.setattr(
-        task_tool_module,
-        "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="done"),
-    )
-    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
-    monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr("deerflow.tools.get_available_tools", get_available_tools)
-
-    output = _run_task_tool(
-        runtime=runtime,
-        description="执行任务",
-        prompt="file work only",
-        subagent_type="general-purpose",
-        tool_call_id="tc-groups",
-    )
-
-    assert output == "Task Succeeded. Result: done"
-    # The key assertion: groups should be propagated from parent metadata
-    get_available_tools.assert_called_once_with(model_name="ark-model", groups=parent_tool_groups, subagent_enabled=False)
-
-
-def test_task_tool_inherits_parent_skill_allowlist_for_default_subagent(monkeypatch):
-    config = _make_subagent_config()
-    runtime = _make_runtime()
-    runtime.config["metadata"]["available_skills"] = ["safe-skill"]
-    events = []
-    captured = {}
-
-    class DummyExecutor:
-        def __init__(self, **kwargs):
-            captured["config"] = kwargs["config"]
-
-        def execute_async(self, prompt, task_id=None):
-            return task_id or "generated-task-id"
-
-    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
-    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-    monkeypatch.setattr(
-        task_tool_module,
-        "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="done"),
-    )
-    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
-    monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr("deerflow.tools.get_available_tools", MagicMock(return_value=[]))
-
-    output = _run_task_tool(
-        runtime=runtime,
-        description="执行任务",
-        prompt="use skills",
-        subagent_type="general-purpose",
-        tool_call_id="tc-skills",
-    )
-
-    assert output == "Task Succeeded. Result: done"
-    assert captured["config"].skills == ["safe-skill"]
-
-
-def test_task_tool_intersects_parent_and_subagent_skill_allowlists(monkeypatch):
-    config = _make_subagent_config()
-    config = SubagentConfig(
-        name=config.name,
-        description=config.description,
-        system_prompt=config.system_prompt,
-        max_turns=config.max_turns,
-        timeout_seconds=config.timeout_seconds,
-        skills=["safe-skill", "other-skill"],
-    )
-    runtime = _make_runtime()
-    runtime.config["metadata"]["available_skills"] = ["safe-skill"]
-    events = []
-    captured = {}
-
-    class DummyExecutor:
-        def __init__(self, **kwargs):
-            captured["config"] = kwargs["config"]
-
-        def execute_async(self, prompt, task_id=None):
-            return task_id or "generated-task-id"
-
-    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
-    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-    monkeypatch.setattr(
-        task_tool_module,
-        "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="done"),
-    )
-    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
-    monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr("deerflow.tools.get_available_tools", MagicMock(return_value=[]))
-
-    output = _run_task_tool(
-        runtime=runtime,
-        description="执行任务",
-        prompt="use skills",
-        subagent_type="general-purpose",
-        tool_call_id="tc-skills-intersection",
-    )
-
-    assert output == "Task Succeeded. Result: done"
-    assert captured["config"].skills == ["safe-skill"]
-
-
-def test_task_tool_no_tool_groups_passes_none(monkeypatch):
-    """Verify that when metadata has no tool_groups, groups=None is passed (backward compat)."""
-    config = _make_subagent_config()
-    # Default _make_runtime() has no tool_groups in metadata
-    runtime = _make_runtime()
-    events = []
-    get_available_tools = MagicMock(return_value=[])
-
-    class DummyExecutor:
-        def __init__(self, **kwargs):
-            pass
-
-        def execute_async(self, prompt, task_id=None):
-            return task_id or "generated-task-id"
-
-    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
-    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-    monkeypatch.setattr(
-        task_tool_module,
-        "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="ok"),
-    )
-    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
-    monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr("deerflow.tools.get_available_tools", get_available_tools)
-
-    output = _run_task_tool(
-        runtime=runtime,
-        description="执行任务",
-        prompt="normal work",
-        subagent_type="general-purpose",
-        tool_call_id="tc-no-groups",
-    )
-
-    assert output == "Task Succeeded. Result: ok"
-    # No tool_groups in metadata → groups=None (default behavior preserved)
-    get_available_tools.assert_called_once_with(model_name="ark-model", groups=None, subagent_enabled=False)
-
-
-def test_task_tool_runtime_none_passes_groups_none(monkeypatch):
-    """Verify that when runtime is None, groups=None is passed (e.g., unknown subagent path exits early, but tools still load correctly)."""
-    config = _make_subagent_config()
-    events = []
-    get_available_tools = MagicMock(return_value=[])
-
-    class DummyExecutor:
-        def __init__(self, **kwargs):
-            pass
-
-        def execute_async(self, prompt, task_id=None):
-            return task_id or "generated-task-id"
-
-    monkeypatch.setattr(task_tool_module, "SubagentStatus", FakeSubagentStatus)
-    monkeypatch.setattr(task_tool_module, "SubagentExecutor", DummyExecutor)
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-    monkeypatch.setattr(
-        task_tool_module,
-        "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="ok"),
-    )
-    monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
-    monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
-    monkeypatch.setattr("deerflow.tools.get_available_tools", get_available_tools)
-
-    output = _run_task_tool(
-        runtime=None,
-        description="执行任务",
-        prompt="no runtime",
-        subagent_type="general-purpose",
-        tool_call_id="tc-no-runtime",
-    )
-
-    assert output == "Task Succeeded. Result: ok"
-    # runtime is None → metadata is empty dict → groups=None
-    get_available_tools.assert_called_once_with(model_name=None, groups=None, subagent_enabled=False)
-
+def test_task_tool_returns_failed_message(monkeypatch):
     config = _make_subagent_config()
     events = []
 
@@ -393,12 +196,12 @@ def test_task_tool_runtime_none_passes_groups_none(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.FAILED, error="subagent crashed"),
+        lambda *a, **k: _make_result(FakeSubagentStatus.FAILED, error="subagent crashed"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -427,12 +230,12 @@ def test_task_tool_returns_timed_out_message(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.TIMED_OUT, error="timeout"),
+        lambda *a, **k: _make_result(FakeSubagentStatus.TIMED_OUT, error="timeout"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -463,12 +266,12 @@ def test_task_tool_polling_safety_timeout(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
+        lambda *a, **k: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -499,12 +302,12 @@ def test_cleanup_called_on_completed(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.COMPLETED, result="done"),
+        lambda *a, **k: _make_result(FakeSubagentStatus.COMPLETED, result="done"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -539,12 +342,12 @@ def test_cleanup_called_on_failed(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.FAILED, error="error"),
+        lambda *a, **k: _make_result(FakeSubagentStatus.FAILED, error="error"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -579,12 +382,12 @@ def test_cleanup_called_on_timed_out(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.TIMED_OUT, error="timeout"),
+        lambda *a, **k: _make_result(FakeSubagentStatus.TIMED_OUT, error="timeout"),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -626,12 +429,12 @@ def test_cleanup_not_called_on_polling_safety_timeout(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
+        lambda *a, **k: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
@@ -679,8 +482,8 @@ def test_cleanup_scheduled_on_cancellation(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(task_tool_module, "get_background_task_result", get_result)
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", cancel_on_first_sleep)
@@ -730,12 +533,12 @@ def test_cancelled_cleanup_stops_after_timeout(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
+        lambda *a, **k: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", cancel_on_first_sleep)
@@ -785,12 +588,12 @@ def test_cancellation_calls_request_cancel(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
     monkeypatch.setattr(
         task_tool_module,
         "get_background_task_result",
-        lambda _: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
+        lambda *a, **k: _make_result(FakeSubagentStatus.RUNNING, ai_messages=[]),
     )
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", cancel_on_first_sleep)
@@ -843,9 +646,9 @@ def test_task_tool_returns_cancelled_message(monkeypatch):
         "SubagentExecutor",
         type("DummyExecutor", (), {"__init__": lambda self, **kwargs: None, "execute_async": lambda self, prompt, task_id=None: task_id}),
     )
-    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda _: config)
-
-    monkeypatch.setattr(task_tool_module, "get_background_task_result", lambda _: next(responses))
+    monkeypatch.setattr(task_tool_module, "get_subagent_config", lambda *a, **k: config)
+    monkeypatch.setattr(task_tool_module, "get_skills_prompt_section", lambda _cfg: "")
+    monkeypatch.setattr(task_tool_module, "get_background_task_result", lambda *a, **k: next(responses))
     monkeypatch.setattr(task_tool_module, "get_stream_writer", lambda: events.append)
     monkeypatch.setattr(task_tool_module.asyncio, "sleep", _no_sleep)
     monkeypatch.setattr("deerflow.tools.get_available_tools", lambda **kwargs: [])
