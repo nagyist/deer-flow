@@ -370,9 +370,19 @@ def _make_test_app(tmp_path: Path):
     from fastapi import FastAPI
 
     from app.gateway.routers.agents import router
+    from deerflow.config.agents_api_config import AgentsApiConfig
+    from deerflow.config.app_config import AppConfig
+    from deerflow.config.sandbox_config import SandboxConfig
 
     app = FastAPI()
     app.include_router(router)
+    # The agents router gates every route through ``Depends(get_config)`` and
+    # only allows access when ``agents_api.enabled`` is true. Wire a permissive
+    # AppConfig onto ``app.state.config`` so the routes are reachable in tests.
+    app.state.config = AppConfig(
+        sandbox=SandboxConfig(use="test"),
+        agents_api=AgentsApiConfig(enabled=True),
+    )
     return app
 
 
