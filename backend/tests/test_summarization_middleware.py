@@ -50,7 +50,7 @@ def _middleware(
     preserve_recent_skill_tokens_per_skill: int = 0,
 ) -> DeerFlowSummarizationMiddleware:
     model = MagicMock()
-    model.invoke.return_value = SimpleNamespace(text="compressed summary")
+    model.invoke.return_value = AIMessage(content="compressed summary")
     return DeerFlowSummarizationMiddleware(
         model=model,
         trigger=trigger,
@@ -672,7 +672,7 @@ async def test_acreate_summary_suppresses_callbacks() -> None:
     """_acreate_summary must pass callbacks=[] to prevent the internal LLM call
     from producing visible streaming events in the frontend (issue #2804)."""
     middleware = _middleware()
-    middleware.model.ainvoke = mock.AsyncMock(return_value=SimpleNamespace(text="async summary"))
+    middleware.model.ainvoke = mock.AsyncMock(return_value=AIMessage(content="async summary"))
 
     await middleware._acreate_summary(_messages())
 

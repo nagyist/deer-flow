@@ -201,7 +201,7 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
                     "callbacks": [],
                 },
             )
-            return response.text.strip()
+            return self._extract_summary_text(response)
         except Exception as e:
             return f"Error generating summary: {e!s}"
 
@@ -230,9 +230,15 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
                     "callbacks": [],
                 },
             )
-            return response.text.strip()
+            return self._extract_summary_text(response)
         except Exception as e:
             return f"Error generating summary: {e!s}"
+
+    def _extract_summary_text(self, response: Any) -> str:
+        summary_text = getattr(response, "content", None)
+        if summary_text is None:
+            summary_text = getattr(response, "text", "")
+        return summary_text.strip() if isinstance(summary_text, str) else str(summary_text).strip()
 
     @override
     def _build_new_messages(self, summary: str) -> list[HumanMessage]:
