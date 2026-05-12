@@ -22,7 +22,7 @@ _TEST_SECRET = "test-secret-key-initialize-admin-min-32"
 def _setup_auth(tmp_path):
     """Fresh SQLite engine + auth config per test."""
     from app.gateway import deps
-    from app.gateway.routers.auth import _SETUP_STATUS_COOLDOWN
+    from app.gateway.routers.auth import _SETUP_STATUS_CACHE
     from deerflow.persistence.engine import close_engine, init_engine
 
     set_auth_config(AuthConfig(jwt_secret=_TEST_SECRET))
@@ -30,13 +30,13 @@ def _setup_auth(tmp_path):
     asyncio.run(init_engine("sqlite", url=url, sqlite_dir=str(tmp_path)))
     deps._cached_local_provider = None
     deps._cached_repo = None
-    _SETUP_STATUS_COOLDOWN.clear()
+    _SETUP_STATUS_CACHE.clear()
     try:
         yield
     finally:
         deps._cached_local_provider = None
         deps._cached_repo = None
-        _SETUP_STATUS_COOLDOWN.clear()
+        _SETUP_STATUS_CACHE.clear()
         asyncio.run(close_engine())
 
 
@@ -168,15 +168,13 @@ def test_setup_status_false_when_only_regular_user_exists(client):
     assert resp.json()["needs_setup"] is True
 
 
-def test_setup_status_rate_limited_on_second_call(client):
-    """Second /setup-status call within the cooldown window returns 429 with Retry-After."""
-    # First call succeeds.
+def test_setup_status_returns_cached_result_on_rapid_calls(client):
+    """Rapid /setup-status calls return the cached result (200) instead of 429."""
+    # First call succeeds and computes the result.
     resp1 = client.get("/api/v1/auth/setup-status")
     assert resp1.status_code == 200
 
-    # Immediate second call is rate-limited.
+    # Immediate second call returns cached result, not 429.
     resp2 = client.get("/api/v1/auth/setup-status")
-    assert resp2.status_code == 429
-    assert "Retry-After" in resp2.headers
-    retry_after = int(resp2.headers["Retry-After"])
-    assert 1 <= retry_after <= 60
+    assert resp2.status_code == 200
+    assert resp2.json() == resp1.json()
