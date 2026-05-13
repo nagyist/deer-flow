@@ -407,7 +407,6 @@ async def setup_status(request: Request):
         if now - cached_time < _SETUP_STATUS_CACHE_TTL_SECONDS:
             return cached_result
 
-    task: asyncio.Task[dict] | None = None
     async with _SETUP_STATUS_INFLIGHT_GUARD:
         # Recheck cache after waiting for the inflight guard.
         now = time.time()
@@ -426,7 +425,7 @@ async def setup_status(request: Request):
                 for k in stale:
                     del _SETUP_STATUS_CACHE[k]
                 if len(_SETUP_STATUS_CACHE) >= _MAX_TRACKED_SETUP_STATUS_IPS:
-                    by_time = sorted(_SETUP_STATUS_CACHE.items(), key=lambda kv: kv[1][0])
+                    by_time = sorted(_SETUP_STATUS_CACHE.items(), key=lambda entry: entry[1][0])
                     for k, _ in by_time[: len(by_time) // 2]:
                         del _SETUP_STATUS_CACHE[k]
 

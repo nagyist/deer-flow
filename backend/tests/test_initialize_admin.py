@@ -231,7 +231,11 @@ async def test_setup_status_single_flight_per_ip(monkeypatch):
             }
         )
 
-    results = await asyncio.gather(auth_router.setup_status(_request()), auth_router.setup_status(_request()), auth_router.setup_status(_request()))
+    results = await asyncio.gather(
+        auth_router.setup_status(_request()),
+        auth_router.setup_status(_request()),
+        auth_router.setup_status(_request()),
+    )
 
     assert all(result["needs_setup"] is True for result in results)
     assert provider.calls == 1
