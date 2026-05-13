@@ -11,10 +11,9 @@ import pytest
 
 os.environ.setdefault("DEER_FLOW_CONFIG_PATH", str(Path(__file__).resolve().parents[2] / "config.example.yaml"))
 
-import store.repositories.models  # noqa: F401
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from store.persistence import MappedBase
 from store.repositories import UserCreate, UserNotFoundError, build_user_repository
+from store.repositories.models import User as UserModel
 
 
 @asynccontextmanager
@@ -22,7 +21,7 @@ async def _session_factory(tmp_path) -> AsyncGenerator[async_sessionmaker[AsyncS
     db_path = tmp_path / "storage-users.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
     async with engine.begin() as conn:
-        await conn.run_sync(MappedBase.metadata.create_all)
+        await conn.run_sync(UserModel.metadata.create_all)
 
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
