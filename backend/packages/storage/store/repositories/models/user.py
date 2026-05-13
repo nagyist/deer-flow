@@ -5,10 +5,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from store.persistence.base_model import DataClassBase, TimeZone
-from store.utils import get_timezone
-
-_tz = get_timezone()
+from store.persistence.base_model import DataClassBase, TimeZone, current_time
 
 
 class User(DataClassBase):
@@ -39,7 +36,7 @@ class User(DataClassBase):
     created_at: Mapped[datetime] = mapped_column(
         TimeZone,
         init=False,
-        default_factory=_tz.now,
+        default_factory=current_time,
         sort_order=999,
         comment="Created at",
     )

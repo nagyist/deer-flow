@@ -70,6 +70,8 @@ def _create_database_url(storage_config: StorageConfig) -> URL:
         url = make_url(storage_config.database_url)
         if storage_config.driver in (DataBaseType.postgresql, "postgres") and url.drivername == "postgresql":
             url = url.set(drivername="postgresql+asyncpg")
+        elif storage_config.driver == DataBaseType.mysql and url.drivername == "mysql":
+            url = url.set(drivername="mysql+aiomysql")
     else:
         url = URL.create(
             drivername=driver,

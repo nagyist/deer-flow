@@ -777,6 +777,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+mysql = [
+    { name = "deerflow-storage", extra = ["mysql"] },
+]
 postgres = [
     { name = "deerflow-harness", extra = ["postgres"] },
     { name = "deerflow-storage", extra = ["postgres"] },
@@ -796,6 +799,7 @@ requires-dist = [
     { name = "deerflow-harness", editable = "packages/harness" },
     { name = "deerflow-harness", extras = ["postgres"], marker = "extra == 'postgres'", editable = "packages/harness" },
     { name = "deerflow-storage", editable = "packages/storage" },
+    { name = "deerflow-storage", extras = ["mysql"], marker = "extra == 'mysql'", editable = "packages/storage" },
     { name = "deerflow-storage", extras = ["postgres"], marker = "extra == 'postgres'", editable = "packages/storage" },
     { name = "dingtalk-stream", specifier = ">=0.24.3" },
     { name = "email-validator", specifier = ">=2.0.0" },
@@ -812,7 +816,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
     { name = "wecom-aibot-python-sdk", specifier = ">=0.1.6" },
 ]
-provides-extras = ["postgres"]
+provides-extras = ["postgres", "mysql"]
 
 [package.metadata.requires-dev]
 dev = [

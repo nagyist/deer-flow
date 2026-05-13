@@ -5,10 +5,7 @@ from datetime import datetime
 from sqlalchemy import Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from store.persistence.base_model import DataClassBase, TimeZone, UniversalText
-from store.utils import get_timezone
-
-_tz = get_timezone()
+from store.persistence.base_model import DataClassBase, TimeZone, UniversalText, current_time
 
 
 class Feedback(DataClassBase):
@@ -33,7 +30,7 @@ class Feedback(DataClassBase):
         "created_at",
         TimeZone,
         init=False,
-        default_factory=_tz.now,
+        default_factory=current_time,
         sort_order=999,
         comment="Created at",
     )

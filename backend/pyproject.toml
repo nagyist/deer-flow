@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["deerflow-harness[postgres]", "deerflow-storage[postgres]"]
+mysql = ["deerflow-storage[mysql]"]
 
 [dependency-groups]
 dev = [

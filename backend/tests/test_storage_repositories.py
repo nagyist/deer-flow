@@ -348,25 +348,23 @@ async def test_storage_run_event_repository_sequences_paginates_and_deletes(tmp_
             )
             await session.commit()
 
-        assert [(row.thread_id, row.seq) for row in rows] == [
-            ("thread-1", 1),
-            ("thread-1", 2),
-            ("thread-1", 3),
-            ("thread-2", 1),
-        ]
+        assert [row.thread_id for row in rows] == ["thread-1", "thread-1", "thread-1", "thread-2"]
+        assert [row.seq for row in rows] == sorted(row.seq for row in rows)
+        assert rows[1].seq == rows[0].seq + 1
+        assert rows[2].seq == rows[1].seq + 1
         assert rows[0].content == {"role": "user", "content": "hello"}
         assert rows[0].metadata == {"source": "input", "content_is_json": True}
 
         async with persistence.session_factory() as session:
             repo = build_run_event_repository(session)
             messages = await repo.list_messages("thread-1", limit=2)
-            assert [event.seq for event in messages] == [1, 3]
+            assert [event.seq for event in messages] == [rows[0].seq, rows[2].seq]
             assert await repo.count_messages("thread-1") == 2
 
             after = await repo.list_messages_by_run("thread-1", "run-1", after_seq=0, limit=5)
-            assert [event.seq for event in after] == [1]
-            before = await repo.list_messages("thread-1", before_seq=3, limit=5)
-            assert [event.seq for event in before] == [1]
+            assert [event.seq for event in after] == [rows[0].seq]
+            before = await repo.list_messages("thread-1", before_seq=rows[2].seq, limit=5)
+            assert [event.seq for event in before] == [rows[0].seq]
 
             events = await repo.list_events("thread-1", "run-1", event_types=["tool"])
             assert [event.content for event in events] == ["tool-call"]
@@ -378,7 +376,20 @@ async def test_storage_run_event_repository_sequences_paginates_and_deletes(tmp_
         async with persistence.session_factory() as session:
             repo = build_run_event_repository(session)
             remaining = await repo.list_events("thread-1", "run-2")
-            assert [event.seq for event in remaining] == [3]
+            assert [event.seq for event in remaining] == [rows[2].seq]
             assert await repo.count_messages("thread-2") == 0
+
+            later = await repo.append_batch(
+                [
+                    RunEventCreate(
+                        thread_id="thread-1",
+                        run_id="run-4",
+                        event_type="message",
+                        category="message",
+                        content="after-delete",
+                    )
+                ]
+            )
+            assert later[0].seq > rows[2].seq
     finally:
         await persistence.aclose()

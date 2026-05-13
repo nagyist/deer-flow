@@ -3,13 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Index, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from store.persistence.base_model import DataClassBase, TimeZone, UniversalText, id_key
-from store.utils import get_timezone
-
-_tz = get_timezone()
+from store.persistence.base_model import (
+    DataClassBase,
+    TimeZone,
+    UniversalText,
+    current_time,
+    id_key,
+)
 
 
 class RunEvent(DataClassBase):
@@ -31,13 +34,13 @@ class RunEvent(DataClassBase):
     category: Mapped[str] = mapped_column(String(16), index=True)
 
     user_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
-    seq: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    seq: Mapped[int] = mapped_column(BigInteger, default=0, index=True)
     content: Mapped[str] = mapped_column(UniversalText, default="")
     meta: Mapped[dict[str, Any]] = mapped_column("event_metadata", JSON, default_factory=dict)
     created_at: Mapped[datetime] = mapped_column(
         TimeZone,
         init=False,
-        default_factory=_tz.now,
+        default_factory=current_time,
         sort_order=999,
         comment="Event timestamp",
     )

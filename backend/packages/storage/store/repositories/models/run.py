@@ -6,10 +6,7 @@ from typing import Any
 from sqlalchemy import JSON, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from store.persistence.base_model import DataClassBase, TimeZone, UniversalText
-from store.utils import get_timezone
-
-_tz = get_timezone()
+from store.persistence.base_model import DataClassBase, TimeZone, UniversalText, current_time
 
 
 class Run(DataClassBase):
@@ -51,7 +48,7 @@ class Run(DataClassBase):
         "created_at",
         TimeZone,
         init=False,
-        default_factory=_tz.now,
+        default_factory=current_time,
         sort_order=999,
         comment="Created at",
     )
@@ -60,7 +57,7 @@ class Run(DataClassBase):
         TimeZone,
         init=False,
         default=None,
-        onupdate=_tz.now,
+        onupdate=current_time,
         sort_order=999,
         comment="Updated at",
     )

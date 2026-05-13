@@ -34,6 +34,8 @@ class RunEvent(BaseModel):
 
 
 class RunEventRepositoryProtocol(Protocol):
+    # Sequence values are time-ordered integer cursors. The application layer
+    # owns the single-writer invariant for a thread while a run is active.
     async def append_batch(self, events: list[RunEventCreate]) -> list[RunEvent]: ...
 
     async def list_messages(

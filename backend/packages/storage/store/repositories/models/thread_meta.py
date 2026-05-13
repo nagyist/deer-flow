@@ -6,10 +6,7 @@ from typing import Any
 from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from store.persistence.base_model import DataClassBase, TimeZone
-from store.utils import get_timezone
-
-_tz = get_timezone()
+from store.persistence.base_model import DataClassBase, TimeZone, current_time
 
 
 class ThreadMeta(DataClassBase):
@@ -31,7 +28,7 @@ class ThreadMeta(DataClassBase):
         "created_at",
         TimeZone,
         init=False,
-        default_factory=_tz.now,
+        default_factory=current_time,
         sort_order=999,
         comment="Created at",
     )
@@ -40,7 +37,7 @@ class ThreadMeta(DataClassBase):
         TimeZone,
         init=False,
         default=None,
-        onupdate=_tz.now,
+        onupdate=current_time,
         sort_order=999,
         comment="Updated at",
     )
