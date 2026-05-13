@@ -39,16 +39,30 @@ def _load_or_create_secret() -> str:
     paths = get_paths()
     secret_file = paths.base_dir / _SECRET_FILE
 
-    if secret_file.exists():
-        secret = secret_file.read_text(encoding="utf-8").strip()
-        if secret:
-            return secret
+    try:
+        if secret_file.exists():
+            secret = secret_file.read_text(encoding="utf-8").strip()
+            if secret:
+                return secret
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to read JWT secret from {secret_file}. "
+            "Set AUTH_JWT_SECRET explicitly or fix DEER_FLOW_HOME/base directory "
+            "permissions so DeerFlow can read its persisted auth secret."
+        ) from exc
 
     secret = secrets.token_urlsafe(32)
-    secret_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(secret)
+    try:
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(secret)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to persist JWT secret to {secret_file}. "
+            "Set AUTH_JWT_SECRET explicitly or fix DEER_FLOW_HOME/base directory "
+            "permissions so DeerFlow can store a stable auth secret."
+        ) from exc
     return secret
 
 
