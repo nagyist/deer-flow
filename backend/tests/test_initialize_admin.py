@@ -204,7 +204,12 @@ async def test_setup_status_single_flight_per_ip(monkeypatch):
     """Concurrent requests from same IP share one in-flight DB query."""
     from starlette.requests import Request
 
-    import app.gateway.routers.auth as auth_router
+    from app.gateway.routers.auth import (
+        _SETUP_STATUS_CACHE,
+        _SETUP_STATUS_INFLIGHT,
+        get_local_provider,
+        setup_status,
+    )
 
     class _Provider:
         def __init__(self):
@@ -216,9 +221,9 @@ async def test_setup_status_single_flight_per_ip(monkeypatch):
             return 0
 
     provider = _Provider()
-    monkeypatch.setattr(auth_router, "get_local_provider", lambda: provider)
-    auth_router._SETUP_STATUS_CACHE.clear()
-    auth_router._SETUP_STATUS_INFLIGHT.clear()
+    monkeypatch.setattr(get_local_provider, "__call__", lambda: provider)
+    _SETUP_STATUS_CACHE.clear()
+    _SETUP_STATUS_INFLIGHT.clear()
 
     def _request() -> Request:
         return Request(
@@ -232,9 +237,9 @@ async def test_setup_status_single_flight_per_ip(monkeypatch):
         )
 
     results = await asyncio.gather(
-        auth_router.setup_status(_request()),
-        auth_router.setup_status(_request()),
-        auth_router.setup_status(_request()),
+        setup_status(_request()),
+        setup_status(_request()),
+        setup_status(_request()),
     )
 
     assert all(result["needs_setup"] is True for result in results)
